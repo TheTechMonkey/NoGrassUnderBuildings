@@ -1,4 +1,6 @@
-# No Grass Under Buildings 0.3.7
+# No Grass Under Buildings 0.3.8
+
+![No Grass Under Buildings logo](Assets/NoGrassUnderBuildings-Logo.png)
 
 For Satisfactory 1.2
 
