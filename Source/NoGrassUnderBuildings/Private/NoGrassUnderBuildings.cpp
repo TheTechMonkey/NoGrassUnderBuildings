@@ -597,7 +597,7 @@ void FNoGrassUnderBuildingsModule::StartupModule()
 	UE_LOG(
 		LogNoGrassUnderBuildings,
 		Display,
-		TEXT("No Grass Under Buildings 0.3.7 initialized (clean configuration UI and exact orange-flower handling)"));
+		TEXT("No Grass Under Buildings 0.3.9 initialized (split subsystem implementation)"));
 }
 
 void FNoGrassUnderBuildingsModule::ShutdownModule()

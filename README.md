@@ -1,4 +1,4 @@
-# No Grass Under Buildings 0.3.8
+# No Grass Under Buildings 0.3.9
 
 ![No Grass Under Buildings logo](Assets/NoGrassUnderBuildings-Logo.png)
 
@@ -40,4 +40,3 @@ per-frame budget, persistent coverage lookups use a spatial index, and stale
 generated-grass snapshots are released when their streamed components unload.
 
 The mod is required on the host/server and connecting clients.
-
