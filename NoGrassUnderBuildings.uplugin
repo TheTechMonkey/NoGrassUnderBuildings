@@ -1,0 +1,34 @@
+{
+	"FileVersion": 3,
+	"Version": 47,
+	"VersionName": "0.3.7",
+	"SemVersion": "0.3.7",
+	"FriendlyName": "No Grass Under Buildings",
+	"Description": "Hides grass beneath buildings and optionally keeps it from regrowing after dismantling without removing trees, bushes, or resource plants.",
+	"Category": "Quality of Life",
+	"CreatedBy": "scami",
+	"CanContainContent": true,
+	"IsBetaVersion": true,
+	"IsExperimentalVersion": true,
+	"Installed": false,
+	"GameVersion": ">=495413",
+	"RequiredOnRemote": true,
+	"Modules": [
+		{
+			"Name": "NoGrassUnderBuildings",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "SML",
+			"Enabled": true,
+			"SemVersion": "^3.12.0"
+		},
+		{
+			"Name": "AbstractInstance",
+			"Enabled": true
+		}
+	]
+}

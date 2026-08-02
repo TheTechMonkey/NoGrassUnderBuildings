@@ -1,0 +1,35 @@
+# Unreal Engine and SML generated output
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+Content/Paks/
+
+# IDE and local project files
+.vs/
+.vscode/
+.idea/
+*.sln
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+
+# Compiled and packaged artifacts
+*.dll
+*.exe
+*.lib
+*.obj
+*.pdb
+*.pak
+*.ucas
+*.utoc
+*.zip
+
+# Local logs and operating-system files
+*.log
+*.tmp
+Thumbs.db
+.DS_Store
