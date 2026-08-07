@@ -670,7 +670,7 @@ void FNoGrassUnderBuildingsModule::StartupModule()
 	UE_LOG(
 		LogNoGrassUnderBuildings,
 		Display,
-		TEXT("No Grass Under Buildings 1.1.0 initialized (localized configuration UI)"));
+		TEXT("No Grass Under Buildings 1.2.0 initialized (localized configuration UI)"));
 }
 
 void FNoGrassUnderBuildingsModule::ShutdownModule()

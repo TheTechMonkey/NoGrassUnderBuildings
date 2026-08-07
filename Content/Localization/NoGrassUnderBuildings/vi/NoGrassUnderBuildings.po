@@ -1,0 +1,112 @@
+﻿# NoGrassUnderBuildings vi machine-assisted translation.
+# 
+msgid ""
+msgstr ""
+"Project-Id-Version: NoGrassUnderBuildings\n"
+"POT-Creation-Date: 2026-08-07 16:45\n"
+"PO-Revision-Date: 2026-08-07 16:45\n"
+"Language-Team: \n"
+"Language: vi\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#. Key:	ConfigName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(73)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(73)
+msgctxt "NoGrassUnderBuildings,ConfigName"
+msgid "No Grass Under Buildings"
+msgstr "Không có cỏ dưới các tòa nhà"
+
+#. Key:	ConfigDescription
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(74)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(74)
+msgctxt "NoGrassUnderBuildings,ConfigDescription"
+msgid "Controls grass cleanup beneath buildings and whether it returns after dismantling."
+msgstr "Kiểm soát việc dọn cỏ bên dưới các tòa nhà và liệu cỏ có quay trở lại sau khi tháo dỡ hay không."
+
+#. Key:	RegrowthMinName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(79)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(79)
+msgctxt "NoGrassUnderBuildings,RegrowthMinName"
+msgid "Regrowth minimum (seconds)"
+msgstr "Tái sinh tối thiểu (giây)"
+
+#. Key:	RegrowthMinTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(80)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(80)
+msgctxt "NoGrassUnderBuildings,RegrowthMinTooltip"
+msgid "Earliest time temporary grass can begin returning after the final covering building is dismantled."
+msgstr "Thời gian sớm nhất cỏ tạm thời có thể bắt đầu quay trở lại sau khi tòa nhà che phủ cuối cùng được tháo dỡ."
+
+#. Key:	RegrowthMaxName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(82)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(82)
+msgctxt "NoGrassUnderBuildings,RegrowthMaxName"
+msgid "Regrowth maximum (seconds)"
+msgstr "Tái sinh tối đa (giây)"
+
+#. Key:	RegrowthMaxTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(83)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(83)
+msgctxt "NoGrassUnderBuildings,RegrowthMaxTooltip"
+msgid "Latest time temporary grass can return. Values below the minimum are treated as the minimum."
+msgstr "Thời gian muộn nhất cỏ tạm thời có thể trở lại. Các giá trị dưới mức tối thiểu được coi là mức tối thiểu."
+
+#. Key:	GradualRegrowthName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(85)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(85)
+msgctxt "NoGrassUnderBuildings,GradualRegrowthName"
+msgid "Gradual edge-to-center regrowth"
+msgstr "Tái sinh dần dần từ rìa đến trung tâm"
+
+#. Key:	GradualRegrowthTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(86)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(86)
+msgctxt "NoGrassUnderBuildings,GradualRegrowthTooltip"
+msgid "Returns generated cliff grass in inexpensive staged waves instead of one obvious pop."
+msgstr "Trả về cỏ trên vách đá được tạo ra theo các đợt dàn dựng rẻ tiền thay vì một đợt bật lên rõ ràng."
+
+#. Key:	HorizontalBufferName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(88)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(88)
+msgctxt "NoGrassUnderBuildings,HorizontalBufferName"
+msgid "Horizontal buffer (meters)"
+msgstr "Bộ đệm ngang (mét)"
+
+#. Key:	HorizontalBufferTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(89)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(89)
+msgctxt "NoGrassUnderBuildings,HorizontalBufferTooltip"
+msgid "Extra grass-clearing distance around a building footprint."
+msgstr "Khoảng cách dọn cỏ bổ sung xung quanh diện tích tòa nhà."
+
+#. Key:	VerticalBufferName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(91)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(91)
+msgctxt "NoGrassUnderBuildings,VerticalBufferName"
+msgid "Vertical buffer (meters)"
+msgstr "Bộ đệm dọc (mét)"
+
+#. Key:	VerticalBufferTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(92)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(92)
+msgctxt "NoGrassUnderBuildings,VerticalBufferTooltip"
+msgid "Extra clearing distance above and below covered building geometry."
+msgstr "Khoảng cách thanh toán bổ sung phía trên và bên dưới hình học tòa nhà được che phủ."
+
+#. Key:	RegrowGrassName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(94)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(94)
+msgctxt "NoGrassUnderBuildings,RegrowGrassName"
+msgid "Regrow grass after dismantling"
+msgstr "Trồng lại cỏ sau khi tháo dỡ"
+
+#. Key:	RegrowGrassTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(95)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(95)
+msgctxt "NoGrassUnderBuildings,RegrowGrassTooltip"
+msgid "When enabled, hidden grass returns after the configured delay. Disable it to keep grass cleared beneath newly placed buildings after they are dismantled. Trees, bushes, resource plants, and other foliage are never permanently removed by this mod."
+msgstr "Khi được bật, cỏ ẩn sẽ trả về sau độ trễ được định cấu hình. Vô hiệu hóa nó để dọn sạch cỏ bên dưới các tòa nhà mới xây sau khi chúng bị tháo dỡ. Cây cối, bụi rậm, cây tài nguyên và các tán lá khác không bao giờ bị loại bỏ vĩnh viễn bởi bản mod này."
+

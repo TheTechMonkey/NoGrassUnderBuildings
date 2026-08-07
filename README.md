@@ -1,4 +1,4 @@
-# No Grass Under Buildings 1.1.0
+# No Grass Under Buildings 1.2.0
 
 ![No Grass Under Buildings logo](Assets/NoGrassUnderBuildings-Logo.png)
 
