@@ -5,6 +5,7 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/MeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Configuration/ModConfiguration.h"
 #include "Engine/Engine.h"
 #include "Engine/StaticMesh.h"
 #include "FGCliffActor.h"
@@ -23,6 +24,77 @@
 #include "UObject/UObjectIterator.h"
 
 DEFINE_LOG_CATEGORY(LogNoGrassUnderBuildings);
+
+#define LOCTEXT_NAMESPACE "NoGrassUnderBuildings"
+
+namespace NoGrassLocalization
+{
+	static void SetPropertyText(
+		UConfigPropertySection* Root,
+		const TCHAR* PropertyName,
+		const FText& DisplayName,
+		const FText& Tooltip)
+	{
+		if (!Root)
+		{
+			return;
+		}
+
+		if (TObjectPtr<UConfigProperty>* Property =
+			Root->SectionProperties.Find(PropertyName))
+		{
+			if (IsValid(Property->Get()))
+			{
+				(*Property)->DisplayName = DisplayName;
+				(*Property)->Tooltip = Tooltip;
+			}
+		}
+	}
+
+	static void ApplyConfigText()
+	{
+		UClass* ConfigClass = LoadClass<UModConfiguration>(
+			nullptr,
+			TEXT("/NoGrassUnderBuildings/NoGrassUnderBuildingsConfiguration.NoGrassUnderBuildingsConfiguration_C"));
+		if (!ConfigClass)
+		{
+			UE_LOG(LogNoGrassUnderBuildings, Warning,
+				TEXT("Could not load configuration class for localization"));
+			return;
+		}
+
+		UModConfiguration* Config =
+			Cast<UModConfiguration>(ConfigClass->GetDefaultObject());
+		if (!Config)
+		{
+			return;
+		}
+
+		Config->DisplayName = LOCTEXT("ConfigName", "No Grass Under Buildings");
+		Config->Description = LOCTEXT(
+			"ConfigDescription",
+			"Controls grass cleanup beneath buildings and whether it returns after dismantling.");
+
+		SetPropertyText(Config->RootSection, TEXT("RegrowthMinSeconds"),
+			LOCTEXT("RegrowthMinName", "Regrowth minimum (seconds)"),
+			LOCTEXT("RegrowthMinTooltip", "Earliest time temporary grass can begin returning after the final covering building is dismantled."));
+		SetPropertyText(Config->RootSection, TEXT("RegrowthMaxSeconds"),
+			LOCTEXT("RegrowthMaxName", "Regrowth maximum (seconds)"),
+			LOCTEXT("RegrowthMaxTooltip", "Latest time temporary grass can return. Values below the minimum are treated as the minimum."));
+		SetPropertyText(Config->RootSection, TEXT("GradualRegrowth"),
+			LOCTEXT("GradualRegrowthName", "Gradual edge-to-center regrowth"),
+			LOCTEXT("GradualRegrowthTooltip", "Returns generated cliff grass in inexpensive staged waves instead of one obvious pop."));
+		SetPropertyText(Config->RootSection, TEXT("HorizontalBufferMeters"),
+			LOCTEXT("HorizontalBufferName", "Horizontal buffer (meters)"),
+			LOCTEXT("HorizontalBufferTooltip", "Extra grass-clearing distance around a building footprint."));
+		SetPropertyText(Config->RootSection, TEXT("VerticalBufferMeters"),
+			LOCTEXT("VerticalBufferName", "Vertical buffer (meters)"),
+			LOCTEXT("VerticalBufferTooltip", "Extra clearing distance above and below covered building geometry."));
+		SetPropertyText(Config->RootSection, TEXT("RegrowGrass"),
+			LOCTEXT("RegrowGrassName", "Regrow grass after dismantling"),
+			LOCTEXT("RegrowGrassTooltip", "When enabled, hidden grass returns after the configured delay. Disable it to keep grass cleared beneath newly placed buildings after they are dismantled. Trees, bushes, resource plants, and other foliage are never permanently removed by this mod."));
+	}
+}
 
 namespace NoGrassDiagnostics
 {
@@ -481,6 +553,7 @@ namespace NoGrassDiagnostics
 
 void FNoGrassUnderBuildingsModule::StartupModule()
 {
+	NoGrassLocalization::ApplyConfigText();
 #if !WITH_EDITOR
 	SUBSCRIBE_METHOD(
 		UGrassInstancedStaticMeshComponent::AcceptPrebuiltTree,
@@ -597,7 +670,7 @@ void FNoGrassUnderBuildingsModule::StartupModule()
 	UE_LOG(
 		LogNoGrassUnderBuildings,
 		Display,
-		TEXT("No Grass Under Buildings 0.3.9 initialized (split subsystem implementation)"));
+		TEXT("No Grass Under Buildings 1.1.0 initialized (localized configuration UI)"));
 }
 
 void FNoGrassUnderBuildingsModule::ShutdownModule()
@@ -605,3 +678,5 @@ void FNoGrassUnderBuildingsModule::ShutdownModule()
 }
 
 IMPLEMENT_MODULE(FNoGrassUnderBuildingsModule, NoGrassUnderBuildings)
+
+#undef LOCTEXT_NAMESPACE

@@ -1,0 +1,112 @@
+# NoGrassUnderBuildings English translation.
+# 
+msgid ""
+msgstr ""
+"Project-Id-Version: NoGrassUnderBuildings\n"
+"POT-Creation-Date: 2026-08-07 16:45\n"
+"PO-Revision-Date: 2026-08-07 16:45\n"
+"Language-Team: \n"
+"Language: ko\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#. Key:	ConfigName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(73)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(73)
+msgctxt "NoGrassUnderBuildings,ConfigName"
+msgid "No Grass Under Buildings"
+msgstr "건물 아래 잔디 제거"
+
+#. Key:	ConfigDescription
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(74)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(74)
+msgctxt "NoGrassUnderBuildings,ConfigDescription"
+msgid "Controls grass cleanup beneath buildings and whether it returns after dismantling."
+msgstr "건물 아래의 잔디 제거와 해체 후 잔디가 다시 자랄지 설정합니다."
+
+#. Key:	RegrowthMinName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(79)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(79)
+msgctxt "NoGrassUnderBuildings,RegrowthMinName"
+msgid "Regrowth minimum (seconds)"
+msgstr "최소 재생 시간(초)"
+
+#. Key:	RegrowthMinTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(80)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(80)
+msgctxt "NoGrassUnderBuildings,RegrowthMinTooltip"
+msgid "Earliest time temporary grass can begin returning after the final covering building is dismantled."
+msgstr "마지막으로 덮고 있던 건물을 해체한 뒤 일시적으로 숨겨진 잔디가 다시 나타나기 시작하는 가장 빠른 시간입니다."
+
+#. Key:	RegrowthMaxName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(82)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(82)
+msgctxt "NoGrassUnderBuildings,RegrowthMaxName"
+msgid "Regrowth maximum (seconds)"
+msgstr "최대 재생 시간(초)"
+
+#. Key:	RegrowthMaxTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(83)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(83)
+msgctxt "NoGrassUnderBuildings,RegrowthMaxTooltip"
+msgid "Latest time temporary grass can return. Values below the minimum are treated as the minimum."
+msgstr "일시적으로 숨겨진 잔디가 다시 나타나는 가장 늦은 시간입니다. 최솟값보다 작은 값은 최솟값으로 처리됩니다."
+
+#. Key:	GradualRegrowthName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(85)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(85)
+msgctxt "NoGrassUnderBuildings,GradualRegrowthName"
+msgid "Gradual edge-to-center regrowth"
+msgstr "가장자리에서 중앙으로 점진적 재생"
+
+#. Key:	GradualRegrowthTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(86)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(86)
+msgctxt "NoGrassUnderBuildings,GradualRegrowthTooltip"
+msgid "Returns generated cliff grass in inexpensive staged waves instead of one obvious pop."
+msgstr "절벽에 생성된 잔디가 한 번에 튀어나오지 않고 부하가 적은 단계로 나뉘어 돌아옵니다."
+
+#. Key:	HorizontalBufferName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(88)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(88)
+msgctxt "NoGrassUnderBuildings,HorizontalBufferName"
+msgid "Horizontal buffer (meters)"
+msgstr "수평 여유 거리(미터)"
+
+#. Key:	HorizontalBufferTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(89)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(89)
+msgctxt "NoGrassUnderBuildings,HorizontalBufferTooltip"
+msgid "Extra grass-clearing distance around a building footprint."
+msgstr "건물 바닥 면적 주변에서 잔디를 추가로 제거하는 거리입니다."
+
+#. Key:	VerticalBufferName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(91)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(91)
+msgctxt "NoGrassUnderBuildings,VerticalBufferName"
+msgid "Vertical buffer (meters)"
+msgstr "수직 여유 거리(미터)"
+
+#. Key:	VerticalBufferTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(92)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(92)
+msgctxt "NoGrassUnderBuildings,VerticalBufferTooltip"
+msgid "Extra clearing distance above and below covered building geometry."
+msgstr "건물이 덮는 형상의 위아래에서 추가로 제거하는 거리입니다."
+
+#. Key:	RegrowGrassName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(94)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(94)
+msgctxt "NoGrassUnderBuildings,RegrowGrassName"
+msgid "Regrow grass after dismantling"
+msgstr "해체 후 잔디 재생"
+
+#. Key:	RegrowGrassTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(95)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(95)
+msgctxt "NoGrassUnderBuildings,RegrowGrassTooltip"
+msgid "When enabled, hidden grass returns after the configured delay. Disable it to keep grass cleared beneath newly placed buildings after they are dismantled. Trees, bushes, resource plants, and other foliage are never permanently removed by this mod."
+msgstr "활성화하면 숨겨진 잔디가 설정된 지연 시간 후 돌아옵니다. 비활성화하면 새로 배치한 건물 아래 잔디가 건물을 해체한 뒤에도 제거된 상태로 유지됩니다. 이 모드는 나무, 덤불, 자원 식물 또는 기타 식생을 영구적으로 제거하지 않습니다."
+

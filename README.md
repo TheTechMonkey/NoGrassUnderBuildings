@@ -1,4 +1,4 @@
-# No Grass Under Buildings 1.0.0
+# No Grass Under Buildings 1.1.0
 
 ![No Grass Under Buildings logo](Assets/NoGrassUnderBuildings-Logo.png)
 
@@ -40,3 +40,9 @@ per-frame budget, persistent coverage lookups use a spatial index, and stale
 generated-grass snapshots are released when their streamed components unload.
 
 The mod is required on the host/server and connecting clients.
+
+## Languages
+
+The configuration page follows the game's selected language. It currently supports English, German, French, Spanish, Brazilian Portuguese, Polish, Russian, Simplified Chinese, Japanese, and Korean.
+
+Translations are community-correctable. See [TRANSLATIONS.md](TRANSLATIONS.md) to improve wording or add another language.

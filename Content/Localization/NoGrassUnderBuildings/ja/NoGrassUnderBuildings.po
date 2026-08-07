@@ -1,0 +1,112 @@
+# NoGrassUnderBuildings English translation.
+# 
+msgid ""
+msgstr ""
+"Project-Id-Version: NoGrassUnderBuildings\n"
+"POT-Creation-Date: 2026-08-07 16:45\n"
+"PO-Revision-Date: 2026-08-07 16:45\n"
+"Language-Team: \n"
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#. Key:	ConfigName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(73)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(73)
+msgctxt "NoGrassUnderBuildings,ConfigName"
+msgid "No Grass Under Buildings"
+msgstr "建物の下の草を除去"
+
+#. Key:	ConfigDescription
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(74)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(74)
+msgctxt "NoGrassUnderBuildings,ConfigDescription"
+msgid "Controls grass cleanup beneath buildings and whether it returns after dismantling."
+msgstr "建物の下にある草の除去と、解体後に草が戻るかどうかを設定します。"
+
+#. Key:	RegrowthMinName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(79)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(79)
+msgctxt "NoGrassUnderBuildings,RegrowthMinName"
+msgid "Regrowth minimum (seconds)"
+msgstr "再生までの最短時間（秒）"
+
+#. Key:	RegrowthMinTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(80)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(80)
+msgctxt "NoGrassUnderBuildings,RegrowthMinTooltip"
+msgid "Earliest time temporary grass can begin returning after the final covering building is dismantled."
+msgstr "最後に覆っていた建物を解体した後、一時的に非表示になった草が戻り始めるまでの最短時間です。"
+
+#. Key:	RegrowthMaxName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(82)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(82)
+msgctxt "NoGrassUnderBuildings,RegrowthMaxName"
+msgid "Regrowth maximum (seconds)"
+msgstr "再生までの最長時間（秒）"
+
+#. Key:	RegrowthMaxTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(83)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(83)
+msgctxt "NoGrassUnderBuildings,RegrowthMaxTooltip"
+msgid "Latest time temporary grass can return. Values below the minimum are treated as the minimum."
+msgstr "一時的に非表示になった草が戻るまでの最長時間です。最小値より小さい値は最小値として扱われます。"
+
+#. Key:	GradualRegrowthName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(85)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(85)
+msgctxt "NoGrassUnderBuildings,GradualRegrowthName"
+msgid "Gradual edge-to-center regrowth"
+msgstr "端から中央へ段階的に再生"
+
+#. Key:	GradualRegrowthTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(86)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(86)
+msgctxt "NoGrassUnderBuildings,GradualRegrowthTooltip"
+msgid "Returns generated cliff grass in inexpensive staged waves instead of one obvious pop."
+msgstr "崖に生成された草を一度に突然表示せず、負荷の軽い段階に分けて戻します。"
+
+#. Key:	HorizontalBufferName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(88)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(88)
+msgctxt "NoGrassUnderBuildings,HorizontalBufferName"
+msgid "Horizontal buffer (meters)"
+msgstr "水平方向の余白（メートル）"
+
+#. Key:	HorizontalBufferTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(89)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(89)
+msgctxt "NoGrassUnderBuildings,HorizontalBufferTooltip"
+msgid "Extra grass-clearing distance around a building footprint."
+msgstr "建物の設置面積の周囲で草を除去する追加距離です。"
+
+#. Key:	VerticalBufferName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(91)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(91)
+msgctxt "NoGrassUnderBuildings,VerticalBufferName"
+msgid "Vertical buffer (meters)"
+msgstr "垂直方向の余白（メートル）"
+
+#. Key:	VerticalBufferTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(92)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(92)
+msgctxt "NoGrassUnderBuildings,VerticalBufferTooltip"
+msgid "Extra clearing distance above and below covered building geometry."
+msgstr "建物に覆われた形状の上下で除去する追加距離です。"
+
+#. Key:	RegrowGrassName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(94)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(94)
+msgctxt "NoGrassUnderBuildings,RegrowGrassName"
+msgid "Regrow grass after dismantling"
+msgstr "解体後に草を再生"
+
+#. Key:	RegrowGrassTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(95)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(95)
+msgctxt "NoGrassUnderBuildings,RegrowGrassTooltip"
+msgid "When enabled, hidden grass returns after the configured delay. Disable it to keep grass cleared beneath newly placed buildings after they are dismantled. Trees, bushes, resource plants, and other foliage are never permanently removed by this mod."
+msgstr "有効にすると、非表示の草が設定した遅延後に戻ります。無効にすると、新しく設置した建物の下の草は建物を解体した後も除去されたままになります。このMODは木、茂み、資源植物、その他の植物を永久に除去しません。"
+

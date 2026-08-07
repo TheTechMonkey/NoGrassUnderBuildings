@@ -1,0 +1,112 @@
+# NoGrassUnderBuildings English translation.
+# 
+msgid ""
+msgstr ""
+"Project-Id-Version: NoGrassUnderBuildings\n"
+"POT-Creation-Date: 2026-08-07 16:45\n"
+"PO-Revision-Date: 2026-08-07 16:45\n"
+"Language-Team: \n"
+"Language: fr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#. Key:	ConfigName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(73)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(73)
+msgctxt "NoGrassUnderBuildings,ConfigName"
+msgid "No Grass Under Buildings"
+msgstr "Pas d’herbe sous les bâtiments"
+
+#. Key:	ConfigDescription
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(74)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(74)
+msgctxt "NoGrassUnderBuildings,ConfigDescription"
+msgid "Controls grass cleanup beneath buildings and whether it returns after dismantling."
+msgstr "Contrôle la suppression de l’herbe sous les bâtiments et son retour après le démantèlement."
+
+#. Key:	RegrowthMinName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(79)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(79)
+msgctxt "NoGrassUnderBuildings,RegrowthMinName"
+msgid "Regrowth minimum (seconds)"
+msgstr "Repousse minimale (secondes)"
+
+#. Key:	RegrowthMinTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(80)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(80)
+msgctxt "NoGrassUnderBuildings,RegrowthMinTooltip"
+msgid "Earliest time temporary grass can begin returning after the final covering building is dismantled."
+msgstr "Délai minimal avant que l’herbe temporairement masquée puisse réapparaître après le démantèlement du dernier bâtiment qui la recouvrait."
+
+#. Key:	RegrowthMaxName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(82)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(82)
+msgctxt "NoGrassUnderBuildings,RegrowthMaxName"
+msgid "Regrowth maximum (seconds)"
+msgstr "Repousse maximale (secondes)"
+
+#. Key:	RegrowthMaxTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(83)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(83)
+msgctxt "NoGrassUnderBuildings,RegrowthMaxTooltip"
+msgid "Latest time temporary grass can return. Values below the minimum are treated as the minimum."
+msgstr "Délai maximal avant le retour de l’herbe temporairement masquée. Les valeurs inférieures au minimum sont traitées comme le minimum."
+
+#. Key:	GradualRegrowthName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(85)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(85)
+msgctxt "NoGrassUnderBuildings,GradualRegrowthName"
+msgid "Gradual edge-to-center regrowth"
+msgstr "Repousse progressive des bords vers le centre"
+
+#. Key:	GradualRegrowthTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(86)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(86)
+msgctxt "NoGrassUnderBuildings,GradualRegrowthTooltip"
+msgid "Returns generated cliff grass in inexpensive staged waves instead of one obvious pop."
+msgstr "Fait réapparaître l’herbe générée des falaises par étapes peu coûteuses plutôt qu’en une seule apparition visible."
+
+#. Key:	HorizontalBufferName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(88)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(88)
+msgctxt "NoGrassUnderBuildings,HorizontalBufferName"
+msgid "Horizontal buffer (meters)"
+msgstr "Marge horizontale (mètres)"
+
+#. Key:	HorizontalBufferTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(89)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(89)
+msgctxt "NoGrassUnderBuildings,HorizontalBufferTooltip"
+msgid "Extra grass-clearing distance around a building footprint."
+msgstr "Distance supplémentaire de suppression de l’herbe autour de l’emprise d’un bâtiment."
+
+#. Key:	VerticalBufferName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(91)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(91)
+msgctxt "NoGrassUnderBuildings,VerticalBufferName"
+msgid "Vertical buffer (meters)"
+msgstr "Marge verticale (mètres)"
+
+#. Key:	VerticalBufferTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(92)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(92)
+msgctxt "NoGrassUnderBuildings,VerticalBufferTooltip"
+msgid "Extra clearing distance above and below covered building geometry."
+msgstr "Distance supplémentaire de suppression au-dessus et au-dessous de la géométrie couverte du bâtiment."
+
+#. Key:	RegrowGrassName
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(94)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(94)
+msgctxt "NoGrassUnderBuildings,RegrowGrassName"
+msgid "Regrow grass after dismantling"
+msgstr "Faire repousser l’herbe après démantèlement"
+
+#. Key:	RegrowGrassTooltip
+#. SourceLocation:	Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(95)
+#: Mods/NoGrassUnderBuildings/Source/NoGrassUnderBuildings/Private/NoGrassUnderBuildings.cpp(95)
+msgctxt "NoGrassUnderBuildings,RegrowGrassTooltip"
+msgid "When enabled, hidden grass returns after the configured delay. Disable it to keep grass cleared beneath newly placed buildings after they are dismantled. Trees, bushes, resource plants, and other foliage are never permanently removed by this mod."
+msgstr "Si activé, l’herbe masquée revient après le délai configuré. Désactivez cette option pour que l’herbe sous les nouveaux bâtiments reste supprimée après leur démantèlement. Les arbres, buissons, plantes à ressources et autres végétaux ne sont jamais supprimés définitivement par ce mod."
+
