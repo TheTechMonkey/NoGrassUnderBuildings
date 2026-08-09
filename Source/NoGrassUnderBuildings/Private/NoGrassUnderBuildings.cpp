@@ -7,6 +7,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Configuration/ModConfiguration.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "Engine/StaticMesh.h"
 #include "FGCliffActor.h"
 #include "FGFoliageRemovalSubsystem.h"
@@ -47,6 +48,9 @@ namespace NoGrassLocalization
 			{
 				(*Property)->DisplayName = DisplayName;
 				(*Property)->Tooltip = Tooltip;
+				// Every No Grass option is consumed live by the world subsystem.
+				// Do not let SML unnecessarily disable it in the pause menu.
+				(*Property)->bRequiresWorldReload = false;
 			}
 		}
 	}
