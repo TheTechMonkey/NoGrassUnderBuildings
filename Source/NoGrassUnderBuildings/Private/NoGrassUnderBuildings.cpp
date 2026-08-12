@@ -568,30 +568,31 @@ void FNoGrassUnderBuildingsModule::StartupModule()
 			int32 NumBuiltRenderInstances,
 			FStaticMeshInstanceData* InstanceData)
 		{
-			if (!IsValid(Component) || !InstanceData)
+			if (IsValid(Component) && InstanceData)
 			{
-				return;
-			}
-
-			if (UWorld* World = Component->GetWorld())
-			{
-				if (UNoGrassWorldSubsystem* Subsystem =
-					World->GetSubsystem<UNoGrassWorldSubsystem>())
+				if (UWorld* World = Component->GetWorld())
 				{
-					Subsystem->FilterGeneratedGrass(
-						Component,
-						ClusterTree,
-						OcclusionLayerNum,
-						NumBuiltRenderInstances,
-						InstanceData);
-					Scope(
-						Component,
-						ClusterTree,
-						OcclusionLayerNum,
-						NumBuiltRenderInstances,
-						InstanceData);
+					if (UNoGrassWorldSubsystem* Subsystem =
+						World->GetSubsystem<UNoGrassWorldSubsystem>())
+					{
+						Subsystem->FilterGeneratedGrass(
+							Component,
+							ClusterTree,
+							OcclusionLayerNum,
+							NumBuiltRenderInstances,
+							InstanceData);
+					}
 				}
 			}
+
+			// This is a pre-hook. The engine must always receive the instance data,
+			// including during startup before the world subsystem exists.
+			Scope(
+				Component,
+				ClusterTree,
+				OcclusionLayerNum,
+				NumBuiltRenderInstances,
+				InstanceData);
 		});
 
 	SUBSCRIBE_METHOD_AFTER(
@@ -648,33 +649,33 @@ void FNoGrassUnderBuildingsModule::StartupModule()
 
 	SUBSCRIBE_METHOD(
 		AFGLightweightBuildableSubsystem::InvalidateRuntimeInstanceDataForIndex,
-		[](auto&,
+		[](auto& Scope,
 			AFGLightweightBuildableSubsystem* LightweightSubsystem,
 			TSubclassOf<AFGBuildable> BuildableClass,
 			int32 RuntimeIndex)
 		{
-			if (!IsValid(LightweightSubsystem) || RuntimeIndex == INDEX_NONE)
+			if (IsValid(LightweightSubsystem) && RuntimeIndex != INDEX_NONE)
 			{
-				return;
-			}
-
-			if (UWorld* World = LightweightSubsystem->GetWorld())
-			{
-				if (UNoGrassWorldSubsystem* Subsystem = World->GetSubsystem<UNoGrassWorldSubsystem>())
+				if (UWorld* World = LightweightSubsystem->GetWorld())
 				{
-					Subsystem->HandleLightweightRemoved(
-						LightweightSubsystem,
-						BuildableClass,
-						RuntimeIndex);
+					if (UNoGrassWorldSubsystem* Subsystem = World->GetSubsystem<UNoGrassWorldSubsystem>())
+					{
+						Subsystem->HandleLightweightRemoved(
+							LightweightSubsystem,
+							BuildableClass,
+							RuntimeIndex);
+					}
 				}
 			}
+
+			Scope(LightweightSubsystem, BuildableClass, RuntimeIndex);
 		});
 #endif
 
 	UE_LOG(
 		LogNoGrassUnderBuildings,
 		Display,
-		TEXT("No Grass Under Buildings 1.2.0 initialized (localized configuration UI)"));
+		TEXT("No Grass Under Buildings 1.2.2 initialized"));
 }
 
 void FNoGrassUnderBuildingsModule::ShutdownModule()
