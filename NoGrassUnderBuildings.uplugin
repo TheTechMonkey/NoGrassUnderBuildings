@@ -30,7 +30,8 @@
 	"Plugins": [
 		{
 			"Name": "AbstractInstance",
-			"Enabled": true
+			"Enabled": true,
+			"SemVersion": "^1.0.2"
 		},
 		{
 			"Name": "SML",
