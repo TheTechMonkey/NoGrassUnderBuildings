@@ -14,13 +14,10 @@ public class NoGrassUnderBuildings : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
-			"NetCore",
 			"FactoryGame",
-			"SML",
 			"Foliage",
 			"Landscape",
-			"AbstractInstance",
-			"PhysicsCore"
+			"SML"
 		});
 	}
 }
