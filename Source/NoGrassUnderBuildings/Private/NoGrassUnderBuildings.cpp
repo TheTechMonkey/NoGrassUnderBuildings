@@ -14,6 +14,10 @@
 #include "HAL/PlatformFileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Patching/NativeHookManager.h"
+#include "RenderTransform.h"
+#include "StaticMeshResources.h"
+#include "TimerManager.h"
 #include "UObject/UObjectIterator.h"
 #include "LandscapeComponent.h"
 #include "LandscapeProxy.h"
@@ -29,6 +33,38 @@ void FNoGrassUnderBuildingsModule::StartupModule()
 			this,
 			&FNoGrassUnderBuildingsModule::ScanNearbyFoliage),
 		ECVF_Default);
+	ArmCliffTraceCommand = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("NoGrassUnderBuildings.TraceNextCliff"),
+		TEXT("Captures the next nearby cliff-grass render upload once, then disarms. Optional radius in meters."),
+		FConsoleCommandWithArgsDelegate::CreateRaw(
+			this,
+			&FNoGrassUnderBuildingsModule::ArmCliffTrace),
+		ECVF_Default);
+#if !WITH_EDITOR
+	SUBSCRIBE_METHOD(
+		UGrassInstancedStaticMeshComponent::AcceptPrebuiltTree,
+		[this](auto& Scope,
+			UGrassInstancedStaticMeshComponent* Component,
+			TArray<FClusterNode>& ClusterTree,
+			int32 OcclusionLayerNum,
+			int32 NumBuiltRenderInstances,
+			FStaticMeshInstanceData* InstanceData)
+		{
+			TraceCliffGrassUpload(
+				Component,
+				ClusterTree,
+				OcclusionLayerNum,
+				NumBuiltRenderInstances,
+				InstanceData);
+			FilterCliffGrassUpload(Component, InstanceData);
+			Scope(
+				Component,
+				ClusterTree,
+				OcclusionLayerNum,
+				NumBuiltRenderInstances,
+				InstanceData);
+		});
+#endif
 	PostWorldInitializationHandle = FWorldDelegates::OnPostWorldInitialization.AddRaw(
 		this,
 		&FNoGrassUnderBuildingsModule::HandlePostWorldInitialization);
@@ -42,7 +78,7 @@ void FNoGrassUnderBuildingsModule::StartupModule()
 	UE_LOG(
 		LogNoGrassUnderBuildings,
 		Display,
-		TEXT("No Grass Under Buildings 1.3.0-beta.1 loaded"));
+		TEXT("Clean-room stage 8 loaded: targeted decorative-foliage suppression"));
 }
 
 void FNoGrassUnderBuildingsModule::ShutdownModule()
@@ -52,6 +88,12 @@ void FNoGrassUnderBuildingsModule::ShutdownModule()
 		IConsoleManager::Get().UnregisterConsoleObject(ScanNearbyCommand);
 		ScanNearbyCommand = nullptr;
 	}
+	if (ArmCliffTraceCommand)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(ArmCliffTraceCommand);
+		ArmCliffTraceCommand = nullptr;
+	}
+	bCliffTraceArmed = false;
 	FWorldDelegates::OnPostWorldInitialization.Remove(PostWorldInitializationHandle);
 	FWorldDelegates::OnWorldCleanup.Remove(WorldCleanupHandle);
 	FWorldDelegates::OnWorldPostActorTick.Remove(WorldPostActorTickHandle);
@@ -66,7 +108,158 @@ void FNoGrassUnderBuildingsModule::ShutdownModule()
 	ExclusionBounds.Empty();
 	LastLightweightClassCount = INDEX_NONE;
 	LastLightweightInstanceCount = INDEX_NONE;
-	UE_LOG(LogNoGrassUnderBuildings, Verbose, TEXT("No Grass Under Buildings unloaded"));
+	UE_LOG(LogNoGrassUnderBuildings, Display, TEXT("Clean-room stage 8 unloaded"));
+}
+
+int32 FNoGrassUnderBuildingsModule::FilterCliffGrassUpload(
+	UGrassInstancedStaticMeshComponent* Component,
+	FStaticMeshInstanceData* InstanceData)
+{
+	// The coverage maps are maintained on the game thread. Do not touch them
+	// from an asynchronous render/grass task.
+	if (!IsInGameThread() || !IsValid(Component) || !InstanceData)
+	{
+		return 0;
+	}
+
+	AFGCliffActor* Cliff = Component->GetTypedOuter<AFGCliffActor>();
+	UWorld* World = Component->GetWorld();
+	if (!IsValid(Cliff) || !IsValid(World) || World != ActiveGameWorld.Get())
+	{
+		return 0;
+	}
+
+	TArray<FBox, TInlineAllocator<32>> CoverageBounds;
+	for (const auto& Pair : ExclusionBounds)
+	{
+		if (Pair.Key.IsValid() && Pair.Value.IsValid)
+		{
+			CoverageBounds.Add(Pair.Value);
+		}
+	}
+	for (const auto& Pair : LightweightExclusions)
+	{
+		if (Pair.Value.Bounds.IsValid)
+		{
+			CoverageBounds.Add(Pair.Value.Bounds);
+		}
+	}
+	if (CoverageBounds.IsEmpty())
+	{
+		return 0;
+	}
+
+	const FTransform ComponentToWorld = Component->GetComponentTransform();
+	int32 HiddenCount = 0;
+	for (int32 InstanceIndex = 0;
+		InstanceIndex < InstanceData->GetNumInstances();
+		++InstanceIndex)
+	{
+		FRenderTransform PackedTransform;
+		InstanceData->GetInstanceTransform(InstanceIndex, PackedTransform);
+		const FVector WorldRoot =
+			(FTransform(PackedTransform.ToMatrix()) * ComponentToWorld).GetLocation();
+
+		for (const FBox& Bounds : CoverageBounds)
+		{
+			if (Bounds.IsInsideOrOn(WorldRoot))
+			{
+				// Keep the buffer length and cluster indices unchanged. Unreal marks
+				// only this instance invisible when it accepts the existing tree.
+				InstanceData->NullifyInstance(InstanceIndex);
+				++HiddenCount;
+				break;
+			}
+		}
+	}
+
+	return HiddenCount;
+}
+
+void FNoGrassUnderBuildingsModule::ArmCliffTrace(const TArray<FString>& Args)
+{
+	UWorld* World = ActiveGameWorld.Get();
+	if (!World)
+	{
+		return;
+	}
+
+	float RadiusMeters = 30.0f;
+	if (!Args.IsEmpty())
+	{
+		RadiusMeters = FMath::Clamp(FCString::Atof(*Args[0]), 5.0f, 100.0f);
+	}
+	FRotator ViewRotation = FRotator::ZeroRotator;
+	if (APlayerController* Controller = World->GetFirstPlayerController())
+	{
+		Controller->GetPlayerViewPoint(CliffTraceCenter, ViewRotation);
+	}
+	CliffTraceRadiusSquared = FMath::Square(RadiusMeters * 100.0f);
+	bCliffTraceArmed = true;
+
+	const FString OutputPath = FPaths::Combine(
+		FPaths::ProjectLogDir(),
+		TEXT("NoGrassUnderBuildings-CliffTrace.txt"));
+	TArray<FString> Lines;
+	Lines.Add(FString::Printf(
+		TEXT("Cliff trace armed; center=%s; radius=%.1fm; waiting for one generated-grass upload"),
+		*CliffTraceCenter.ToCompactString(),
+		RadiusMeters));
+	FFileHelper::SaveStringArrayToFile(Lines, *OutputPath);
+	UE_LOG(LogNoGrassUnderBuildings, Display, TEXT("Cliff trace armed once: %s"), *OutputPath);
+}
+
+void FNoGrassUnderBuildingsModule::TraceCliffGrassUpload(
+	UGrassInstancedStaticMeshComponent* Component,
+	const TArray<FClusterNode>& ClusterTree,
+	int32 OcclusionLayerNum,
+	int32 NumBuiltRenderInstances,
+	const FStaticMeshInstanceData* InstanceData)
+{
+	if ((!bCliffTraceArmed && !bAutoCliffTracePending) || !IsValid(Component) || !InstanceData)
+	{
+		return;
+	}
+	AFGCliffActor* Cliff = Component->GetTypedOuter<AFGCliffActor>();
+	UWorld* ComponentWorld = Component->GetWorld();
+	if (!IsValid(Cliff) || !IsValid(ComponentWorld) || !ComponentWorld->IsGameWorld())
+	{
+		return;
+	}
+	const bool bManualTrace = bCliffTraceArmed;
+	const FBox CliffBounds = Cliff->GetComponentsBoundingBox(true);
+	if (bManualTrace && CliffBounds.ComputeSquaredDistanceToPoint(CliffTraceCenter) > CliffTraceRadiusSquared)
+	{
+		return;
+	}
+
+	// One matching upload is enough. Disarm before doing file work so a nested or
+	// concurrent upload cannot produce a flood of diagnostic output.
+	bCliffTraceArmed = false;
+	bAutoCliffTracePending = false;
+	const UStaticMesh* Mesh = Component->GetStaticMesh();
+	TArray<FString> Lines;
+	Lines.Add(TEXT("No Grass Under Buildings - one-shot cliff generation trace"));
+	Lines.Add(FString::Printf(TEXT("capture-mode=%s"), bManualTrace ? TEXT("manual-nearby") : TEXT("automatic-first-world-upload")));
+	Lines.Add(FString::Printf(TEXT("game-thread=%s"), IsInGameThread() ? TEXT("true") : TEXT("false")));
+	Lines.Add(FString::Printf(TEXT("cliff=%s"), *Cliff->GetPathName()));
+	Lines.Add(FString::Printf(TEXT("component=%s"), *Component->GetPathName()));
+	Lines.Add(FString::Printf(TEXT("mesh=%s"), Mesh ? *Mesh->GetPathName() : TEXT("<none>")));
+	Lines.Add(FString::Printf(TEXT("cliff-significant=%s"), Cliff->IsSignificant() ? TEXT("true") : TEXT("false")));
+	Lines.Add(FString::Printf(TEXT("component-registered=%s"), Component->IsRegistered() ? TEXT("true") : TEXT("false")));
+	Lines.Add(FString::Printf(TEXT("cpu-component-instances-before-upload=%d"), Component->GetInstanceCount()));
+	Lines.Add(FString::Printf(TEXT("incoming-buffer-instances=%d"), InstanceData->GetNumInstances()));
+	Lines.Add(FString::Printf(TEXT("declared-render-instances=%d"), NumBuiltRenderInstances));
+	Lines.Add(FString::Printf(TEXT("cluster-nodes=%d"), ClusterTree.Num()));
+	Lines.Add(FString::Printf(TEXT("occlusion-layer-nodes=%d"), OcclusionLayerNum));
+	Lines.Add(FString::Printf(TEXT("cliff-bounds=%s"), *CliffBounds.ToString()));
+	Lines.Add(TEXT("result=upload observed without modifying the buffer"));
+
+	const FString OutputPath = FPaths::Combine(
+		FPaths::ProjectLogDir(),
+		TEXT("NoGrassUnderBuildings-CliffTrace.txt"));
+	FFileHelper::SaveStringArrayToFile(Lines, *OutputPath);
+	UE_LOG(LogNoGrassUnderBuildings, Display, TEXT("Captured one cliff-grass upload and disarmed: %s"), *OutputPath);
 }
 
 void FNoGrassUnderBuildingsModule::ScanNearbyFoliage(const TArray<FString>& Args)
@@ -395,7 +588,7 @@ void FNoGrassUnderBuildingsModule::HandlePostWorldInitialization(
 		AppliedFoliageRevision = MAX_uint64;
 		UE_LOG(
 			LogNoGrassUnderBuildings,
-			Verbose,
+			Display,
 			TEXT("Game world initialized: %s"),
 			*World->GetPathName());
 	}
@@ -410,7 +603,7 @@ void FNoGrassUnderBuildingsModule::HandleWorldCleanup(
 	{
 		UE_LOG(
 			LogNoGrassUnderBuildings,
-			Verbose,
+			Display,
 			TEXT("Game world cleanup: %s session-ended=%s cleanup-resources=%s"),
 			*World->GetPathName(),
 			bSessionEnded ? TEXT("true") : TEXT("false"),
@@ -536,7 +729,7 @@ void FNoGrassUnderBuildingsModule::ScanLightweightBuildables(UWorld* World)
 	{
 		UE_LOG(
 			LogNoGrassUnderBuildings,
-			VeryVerbose,
+			Display,
 			TEXT("Lightweight scan: classes=%d instances=%d foundation-classes=[%s]"),
 			ValidClassCount,
 			ValidInstanceCount,
@@ -680,7 +873,7 @@ void FNoGrassUnderBuildingsModule::ScanBuildables(UWorld* World)
 		++CoverageRevision;
 		UE_LOG(
 			LogNoGrassUnderBuildings,
-			VeryVerbose,
+			Display,
 			TEXT("Buildable scan: added=%d removed=%d tracked=%d"),
 			Added,
 			Removed,
@@ -751,6 +944,8 @@ void FNoGrassUnderBuildingsModule::RefreshLandscapeGrass(
 		return;
 	}
 
+	RefreshCliffGrass(World, ChangedBounds);
+
 	for (TActorIterator<ALandscapeProxy> It(World); It; ++It)
 	{
 		ALandscapeProxy* Proxy = *It;
@@ -782,6 +977,52 @@ void FNoGrassUnderBuildingsModule::RefreshLandscapeGrass(
 		{
 			Proxy->FlushGrassComponents(&Components, false);
 		}
+	}
+}
+
+void FNoGrassUnderBuildingsModule::RefreshCliffGrass(
+	UWorld* World,
+	const TArray<FBox>& ChangedBounds)
+{
+	if (!World || ChangedBounds.IsEmpty())
+	{
+		return;
+	}
+
+	for (TActorIterator<AFGCliffActor> It(World); It; ++It)
+	{
+		AFGCliffActor* Cliff = *It;
+		if (!IsValid(Cliff) || !Cliff->IsSignificant())
+		{
+			continue;
+		}
+
+		const FBox CliffBounds = Cliff->GetComponentsBoundingBox(true);
+		bool bIntersectsChange = false;
+		for (const FBox& Bounds : ChangedBounds)
+		{
+			if (Bounds.IsValid && CliffBounds.Intersect(Bounds))
+			{
+				bIntersectsChange = true;
+				break;
+			}
+		}
+
+		if (!bIntersectsChange)
+		{
+			continue;
+		}
+
+		const TWeakObjectPtr<AFGCliffActor> WeakCliff(Cliff);
+		IFGSignificanceInterface::Execute_LostSignificance(Cliff);
+		World->GetTimerManager().SetTimerForNextTick(
+			FTimerDelegate::CreateLambda([WeakCliff]()
+			{
+				if (AFGCliffActor* ValidCliff = WeakCliff.Get())
+				{
+					IFGSignificanceInterface::Execute_GainedSignificance(ValidCliff);
+				}
+			}));
 	}
 }
 

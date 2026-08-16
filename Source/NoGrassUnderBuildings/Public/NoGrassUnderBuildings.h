@@ -79,6 +79,16 @@ private:
 		TArray<FBox>& RefreshBounds);
 	void ClearLightweightExclusions(UWorld* World, bool bRefresh);
 	void ScanNearbyFoliage(const TArray<FString>& Args);
+	void ArmCliffTrace(const TArray<FString>& Args);
+	void TraceCliffGrassUpload(
+		UGrassInstancedStaticMeshComponent* Component,
+		const TArray<FClusterNode>& ClusterTree,
+		int32 OcclusionLayerNum,
+		int32 NumBuiltRenderInstances,
+		const FStaticMeshInstanceData* InstanceData);
+	int32 FilterCliffGrassUpload(
+		UGrassInstancedStaticMeshComponent* Component,
+		FStaticMeshInstanceData* InstanceData);
 	void ReconcileDecorativeFoliage(UWorld* World);
 	void RestoreAllDecorativeFoliage();
 	bool IsDecorativeGroundFoliage(const UHierarchicalInstancedStaticMeshComponent* Component) const;
@@ -86,6 +96,7 @@ private:
 	void RemoveLandscapeExclusion(const TWeakObjectPtr<AFGBuildable>& Buildable);
 	void RefreshLandscapeGrass(UWorld* World, const FBox& ChangedBounds);
 	void RefreshLandscapeGrass(UWorld* World, const TArray<FBox>& ChangedBounds);
+	void RefreshCliffGrass(UWorld* World, const TArray<FBox>& ChangedBounds);
 	FDelegateHandle PostWorldInitializationHandle;
 	FDelegateHandle WorldCleanupHandle;
 	FDelegateHandle WorldPostActorTickHandle;
@@ -99,6 +110,11 @@ private:
 	int32 LastLightweightInstanceCount = INDEX_NONE;
 	TMap<FNoGrassLightweightKey, FNoGrassLightweightExclusion> LightweightExclusions;
 	IConsoleObject* ScanNearbyCommand = nullptr;
+	IConsoleObject* ArmCliffTraceCommand = nullptr;
+	bool bCliffTraceArmed = false;
+	bool bAutoCliffTracePending = true;
+	FVector CliffTraceCenter = FVector::ZeroVector;
+	float CliffTraceRadiusSquared = 0.0f;
 	TMap<FNoGrassFoliageInstanceKey, FTransform> SuppressedFoliage;
 	uint64 CoverageRevision = 0;
 	uint64 AppliedFoliageRevision = MAX_uint64;
