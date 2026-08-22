@@ -5,11 +5,14 @@
 #include "Modules/ModuleManager.h"
 
 class AFGBuildable;
+class AFGBuildableSubsystem;
 class AFGCliffActor;
+class AFGLightweightBuildableSubsystem;
 class UNoGrassLightweightExclusionToken;
 class UFGFoliageInstancedSMC;
 class UGrassInstancedStaticMeshComponent;
 class UHierarchicalInstancedStaticMeshComponent;
+class ULevel;
 class IConsoleObject;
 struct FClusterNode;
 class FStaticMeshInstanceData;
@@ -65,6 +68,20 @@ private:
 	void HandlePostWorldInitialization(UWorld* World, const UWorld::InitializationValues InitializationValues);
 	void HandleWorldCleanup(UWorld* World, bool bSessionEnded, bool bCleanupResources);
 	void HandleWorldPostActorTick(UWorld* World, ELevelTick TickType, float DeltaSeconds);
+	void HandleLevelAddedToWorld(ULevel* Level, UWorld* World);
+	void HandleBuildableAdded(AFGBuildableSubsystem* Subsystem, AFGBuildable* Buildable);
+	void HandleBuildableRemoved(AFGBuildableSubsystem* Subsystem, AFGBuildable* Buildable);
+	void HandleLightweightAdded(
+		AFGLightweightBuildableSubsystem* Subsystem,
+		UClass* BuildableClass,
+		int32 RuntimeIndex);
+	void HandleLightweightRemoving(
+		AFGLightweightBuildableSubsystem* Subsystem,
+		UClass* BuildableClass,
+		int32 RuntimeIndex);
+	void QueueCoverageRefresh(const FBox& Bounds, const TCHAR* Reason);
+	void ProcessPendingCoverageRefresh(UWorld* World);
+	bool IsHorizontalAreaFullyCovered(const FBox& Bounds) const;
 	void ScanBuildables(UWorld* World);
 	void ScanLightweightBuildables(UWorld* World);
 	void AddLightweightExclusion(
@@ -89,17 +106,23 @@ private:
 	int32 FilterCliffGrassUpload(
 		UGrassInstancedStaticMeshComponent* Component,
 		FStaticMeshInstanceData* InstanceData);
-	void ReconcileDecorativeFoliage(UWorld* World);
+	void ReconcileDecorativeFoliage(
+		UWorld* World,
+		const TSet<TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent>>* ComponentFilter = nullptr);
+	void ProcessPendingStreamedFoliage(UWorld* World);
 	void RestoreAllDecorativeFoliage();
 	bool IsDecorativeGroundFoliage(const UHierarchicalInstancedStaticMeshComponent* Component) const;
 	void AddLandscapeExclusion(AFGBuildable* Buildable, bool bRefresh = true);
-	void RemoveLandscapeExclusion(const TWeakObjectPtr<AFGBuildable>& Buildable);
+	void RemoveLandscapeExclusion(
+		const TWeakObjectPtr<AFGBuildable>& Buildable,
+		bool bRefresh = true);
 	void RefreshLandscapeGrass(UWorld* World, const FBox& ChangedBounds);
 	void RefreshLandscapeGrass(UWorld* World, const TArray<FBox>& ChangedBounds);
 	void RefreshCliffGrass(UWorld* World, const TArray<FBox>& ChangedBounds);
 	FDelegateHandle PostWorldInitializationHandle;
 	FDelegateHandle WorldCleanupHandle;
 	FDelegateHandle WorldPostActorTickHandle;
+	FDelegateHandle LevelAddedToWorldHandle;
 	TWeakObjectPtr<UWorld> ActiveGameWorld;
 	TSet<TWeakObjectPtr<AFGBuildable>> KnownBuildables;
 	TSet<TWeakObjectPtr<AFGBuildable>> ExcludedBuildables;
@@ -109,13 +132,17 @@ private:
 	int32 LastLightweightClassCount = INDEX_NONE;
 	int32 LastLightweightInstanceCount = INDEX_NONE;
 	TMap<FNoGrassLightweightKey, FNoGrassLightweightExclusion> LightweightExclusions;
+	TArray<FBox> PendingRefreshBounds;
+	int32 PendingCoverageEventCount = 0;
+	double PendingCoverageQueuedAt = 0.0;
 	IConsoleObject* ScanNearbyCommand = nullptr;
 	IConsoleObject* ArmCliffTraceCommand = nullptr;
 	bool bCliffTraceArmed = false;
-	bool bAutoCliffTracePending = true;
+	bool bAutoCliffTracePending = false;
 	FVector CliffTraceCenter = FVector::ZeroVector;
 	float CliffTraceRadiusSquared = 0.0f;
 	TMap<FNoGrassFoliageInstanceKey, FTransform> SuppressedFoliage;
+	TSet<TWeakObjectPtr<ULevel>> PendingStreamedLevels;
 	uint64 CoverageRevision = 0;
 	uint64 AppliedFoliageRevision = MAX_uint64;
 };
