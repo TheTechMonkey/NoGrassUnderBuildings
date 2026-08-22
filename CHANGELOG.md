@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.2
+
+- Added a three-dimensional spatial index so grass processing checks only nearby buildings instead of every tracked structure in the save.
+- Reduced the spatial grid to 20-meter cells to avoid frame pauses in large or densely built saves.
+- Removed per-building UObject tracking tokens that could exhaust Unreal Engine's object limit in extremely large saves.
+- Applied the optimized nearby-only filtering to both landscape grass and cliff grass as foliage streams in.
+- Preserved event-driven placement and dismantle handling, vegetation restoration, and multiplayer support.
+
 ## 1.3.1
 
 - Replaced recurring full-world building scans with event-driven placement and dismantle tracking.

@@ -1,5 +1,4 @@
 #include "NoGrassUnderBuildings.h"
-#include "NoGrassLightweightExclusionToken.h"
 
 #include "Buildables/FGBuildable.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
@@ -95,7 +94,7 @@ void FNoGrassUnderBuildingsModule::StartupModule()
 				OcclusionLayerNum,
 				NumBuiltRenderInstances,
 				InstanceData);
-			FilterCliffGrassUpload(Component, InstanceData);
+			FilterGrassUpload(Component, InstanceData);
 			Scope(
 				Component,
 				ClusterTree,
@@ -150,8 +149,10 @@ void FNoGrassUnderBuildingsModule::ShutdownModule()
 	KnownBuildables.Empty();
 	ExcludedBuildables.Empty();
 	ExclusionBounds.Empty();
+	BuildableCoverageGrid.Empty();
 	LastLightweightClassCount = INDEX_NONE;
 	LastLightweightInstanceCount = INDEX_NONE;
+	LightweightCoverageGrid.Empty();
 	PendingRefreshBounds.Empty();
 	PendingCoverageEventCount = 0;
 	PendingCoverageQueuedAt = 0.0;
@@ -159,7 +160,7 @@ void FNoGrassUnderBuildingsModule::ShutdownModule()
 	UE_LOG(LogNoGrassUnderBuildings, Display, TEXT("No Grass Under Buildings unloaded"));
 }
 
-int32 FNoGrassUnderBuildingsModule::FilterCliffGrassUpload(
+int32 FNoGrassUnderBuildingsModule::FilterGrassUpload(
 	UGrassInstancedStaticMeshComponent* Component,
 	FStaticMeshInstanceData* InstanceData)
 {
@@ -170,37 +171,23 @@ int32 FNoGrassUnderBuildingsModule::FilterCliffGrassUpload(
 		return 0;
 	}
 
-	AFGCliffActor* Cliff = Component->GetTypedOuter<AFGCliffActor>();
 	UWorld* World = Component->GetWorld();
-	if (!IsValid(Cliff) || !IsValid(World) || World != ActiveGameWorld.Get())
+	if (!IsValid(World) || World != ActiveGameWorld.Get())
 	{
 		return 0;
 	}
 
-	TArray<FBox, TInlineAllocator<32>> CoverageBounds;
-	for (const auto& Pair : ExclusionBounds)
-	{
-		if (Pair.Key.IsValid() && Pair.Value.IsValid)
-		{
-			CoverageBounds.Add(Pair.Value);
-		}
-	}
-	for (const auto& Pair : LightweightExclusions)
-	{
-		if (Pair.Value.Bounds.IsValid)
-		{
-			CoverageBounds.Add(Pair.Value.Bounds);
-		}
-	}
-	if (CoverageBounds.IsEmpty())
+	if (BuildableCoverageGrid.IsEmpty() && LightweightCoverageGrid.IsEmpty())
 	{
 		return 0;
 	}
 
+	const double StartedAt = FPlatformTime::Seconds();
+	const int32 InstanceCount = InstanceData->GetNumInstances();
 	const FTransform ComponentToWorld = Component->GetComponentTransform();
 	int32 HiddenCount = 0;
 	for (int32 InstanceIndex = 0;
-		InstanceIndex < InstanceData->GetNumInstances();
+		InstanceIndex < InstanceCount;
 		++InstanceIndex)
 	{
 		FRenderTransform PackedTransform;
@@ -208,17 +195,26 @@ int32 FNoGrassUnderBuildingsModule::FilterCliffGrassUpload(
 		const FVector WorldRoot =
 			(FTransform(PackedTransform.ToMatrix()) * ComponentToWorld).GetLocation();
 
-		for (const FBox& Bounds : CoverageBounds)
+		if (IsLocationCovered(WorldRoot))
 		{
-			if (Bounds.IsInsideOrOn(WorldRoot))
-			{
-				// Keep the buffer length and cluster indices unchanged. Unreal marks
-				// only this instance invisible when it accepts the existing tree.
-				InstanceData->NullifyInstance(InstanceIndex);
-				++HiddenCount;
-				break;
-			}
+			// Keep the buffer length and cluster indices unchanged. Unreal marks
+			// only this instance invisible when it accepts the existing tree.
+			InstanceData->NullifyInstance(InstanceIndex);
+			++HiddenCount;
 		}
+	}
+	const double ElapsedMs = (FPlatformTime::Seconds() - StartedAt) * 1000.0;
+	if (ElapsedMs >= 10.0)
+	{
+		UE_LOG(
+			LogNoGrassUnderBuildings,
+			Display,
+			TEXT("Grass upload spatial filter: instances=%d hidden=%d regular-cells=%d lightweight-cells=%d time=%.2f ms"),
+			InstanceCount,
+			HiddenCount,
+			BuildableCoverageGrid.Num(),
+			LightweightCoverageGrid.Num(),
+			ElapsedMs);
 	}
 
 	return HiddenCount;
@@ -466,16 +462,6 @@ void FNoGrassUnderBuildingsModule::ReconcileDecorativeFoliage(
 		return;
 	}
 
-	TArray<FBox> CoverageBounds;
-	ExclusionBounds.GenerateValueArray(CoverageBounds);
-	for (const auto& Pair : LightweightExclusions)
-	{
-		if (Pair.Value.Bounds.IsValid)
-		{
-			CoverageBounds.Add(Pair.Value.Bounds);
-		}
-	}
-
 	TSet<FNoGrassFoliageInstanceKey> DesiredSuppression;
 	TSet<TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent>> DirtyComponents;
 	for (TObjectIterator<UHierarchicalInstancedStaticMeshComponent> It; It; ++It)
@@ -489,6 +475,8 @@ void FNoGrassUnderBuildingsModule::ReconcileDecorativeFoliage(
 		}
 
 		const FBox ComponentBounds = Component->Bounds.GetBox();
+		TArray<FBox> CoverageBounds;
+		GatherCoverageBounds(ComponentBounds, CoverageBounds);
 		for (const FBox& Bounds : CoverageBounds)
 		{
 			if (!Bounds.IsValid || !ComponentBounds.Intersect(Bounds))
@@ -511,14 +499,9 @@ void FNoGrassUnderBuildingsModule::ReconcileDecorativeFoliage(
 		{
 			continue;
 		}
-		const FVector OriginalLocation = Pair.Value.GetLocation();
-		for (const FBox& Bounds : CoverageBounds)
+		if (IsLocationCovered(Pair.Value.GetLocation()))
 		{
-			if (Bounds.IsValid && Bounds.IsInsideOrOn(OriginalLocation))
-			{
-				DesiredSuppression.Add(Pair.Key);
-				break;
-			}
+			DesiredSuppression.Add(Pair.Key);
 		}
 	}
 
@@ -647,13 +630,27 @@ void FNoGrassUnderBuildingsModule::ProcessPendingStreamedFoliage(UWorld* World)
 	{
 		const double StartedAt = FPlatformTime::Seconds();
 		ReconcileDecorativeFoliage(World, &Components);
-		UE_LOG(
-			LogNoGrassUnderBuildings,
-			Verbose,
-			TEXT("Reconciled %d decorative foliage component(s) from %d streamed level(s) in %.2f ms"),
-			Components.Num(),
-			StreamedLevels.Num(),
-			(FPlatformTime::Seconds() - StartedAt) * 1000.0);
+		const double ElapsedMs = (FPlatformTime::Seconds() - StartedAt) * 1000.0;
+		if (ElapsedMs >= 10.0)
+		{
+			UE_LOG(
+				LogNoGrassUnderBuildings,
+				Display,
+				TEXT("Slow streamed-foliage reconciliation: components=%d levels=%d time=%.2f ms"),
+				Components.Num(),
+				StreamedLevels.Num(),
+				ElapsedMs);
+		}
+		else
+		{
+			UE_LOG(
+				LogNoGrassUnderBuildings,
+				Verbose,
+				TEXT("Reconciled %d decorative foliage component(s) from %d streamed level(s) in %.2f ms"),
+				Components.Num(),
+				StreamedLevels.Num(),
+				ElapsedMs);
+		}
 	}
 }
 
@@ -700,11 +697,13 @@ void FNoGrassUnderBuildingsModule::HandlePostWorldInitialization(
 		ActiveGameWorld = World;
 		KnownBuildables.Empty();
 		ExcludedBuildables.Empty();
-		ExclusionBounds.Empty();
+	ExclusionBounds.Empty();
+	BuildableCoverageGrid.Empty();
 		NextBuildableScanAt = 0.0;
 		bInitialBuildableScanComplete = false;
 		LastLightweightClassCount = INDEX_NONE;
-		LastLightweightInstanceCount = INDEX_NONE;
+	LastLightweightInstanceCount = INDEX_NONE;
+	LightweightCoverageGrid.Empty();
 		PendingRefreshBounds.Empty();
 		PendingCoverageEventCount = 0;
 		PendingCoverageQueuedAt = 0.0;
@@ -743,10 +742,12 @@ void FNoGrassUnderBuildingsModule::HandleWorldCleanup(
 		KnownBuildables.Empty();
 		ExcludedBuildables.Empty();
 		ExclusionBounds.Empty();
+		BuildableCoverageGrid.Empty();
 		NextBuildableScanAt = 0.0;
 		bInitialBuildableScanComplete = false;
 		LastLightweightClassCount = INDEX_NONE;
 		LastLightweightInstanceCount = INDEX_NONE;
+		LightweightCoverageGrid.Empty();
 		PendingRefreshBounds.Empty();
 		PendingCoverageEventCount = 0;
 		PendingCoverageQueuedAt = 0.0;
@@ -782,6 +783,12 @@ void FNoGrassUnderBuildingsModule::HandleWorldPostActorTick(
 			LogNoGrassUnderBuildings,
 			Display,
 			TEXT("Initial coverage scan complete; event-driven tracking active"));
+		UE_LOG(
+			LogNoGrassUnderBuildings,
+			Display,
+			TEXT("Coverage spatial index: regular-cells=%d lightweight-cells=%d"),
+			BuildableCoverageGrid.Num(),
+			LightweightCoverageGrid.Num());
 	}
 
 	ProcessPendingCoverageRefresh(World);
@@ -1033,6 +1040,200 @@ bool FNoGrassUnderBuildingsModule::IsHorizontalAreaFullyCovered(const FBox& Boun
 	return true;
 }
 
+FIntVector FNoGrassUnderBuildingsModule::GetCoverageGridCell(const FVector& Location) const
+{
+	return FIntVector(
+		FMath::FloorToInt(Location.X / CoverageGridCellSize),
+		FMath::FloorToInt(Location.Y / CoverageGridCellSize),
+		FMath::FloorToInt(Location.Z / CoverageGridCellSize));
+}
+
+void FNoGrassUnderBuildingsModule::AddBuildableToCoverageGrid(
+	const TWeakObjectPtr<AFGBuildable>& Buildable,
+	const FBox& Bounds)
+{
+	if (!Buildable.IsValid() || !Bounds.IsValid)
+	{
+		return;
+	}
+	const FIntVector MinCell = GetCoverageGridCell(Bounds.Min);
+	const FIntVector MaxCell = GetCoverageGridCell(Bounds.Max);
+	for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
+	{
+		for (int32 Y = MinCell.Y; Y <= MaxCell.Y; ++Y)
+		{
+			for (int32 Z = MinCell.Z; Z <= MaxCell.Z; ++Z)
+			{
+				BuildableCoverageGrid.FindOrAdd(FIntVector(X, Y, Z)).Add(Buildable);
+			}
+		}
+	}
+}
+
+void FNoGrassUnderBuildingsModule::RemoveBuildableFromCoverageGrid(
+	const TWeakObjectPtr<AFGBuildable>& Buildable,
+	const FBox& Bounds)
+{
+	if (!Bounds.IsValid)
+	{
+		return;
+	}
+	const FIntVector MinCell = GetCoverageGridCell(Bounds.Min);
+	const FIntVector MaxCell = GetCoverageGridCell(Bounds.Max);
+	for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
+	{
+		for (int32 Y = MinCell.Y; Y <= MaxCell.Y; ++Y)
+		{
+			for (int32 Z = MinCell.Z; Z <= MaxCell.Z; ++Z)
+			{
+				const FIntVector Cell(X, Y, Z);
+				if (TSet<TWeakObjectPtr<AFGBuildable>>* Entries = BuildableCoverageGrid.Find(Cell))
+				{
+					Entries->Remove(Buildable);
+					if (Entries->IsEmpty())
+					{
+						BuildableCoverageGrid.Remove(Cell);
+					}
+				}
+			}
+		}
+	}
+}
+
+void FNoGrassUnderBuildingsModule::AddLightweightToCoverageGrid(
+	const FNoGrassLightweightKey& Key,
+	const FBox& Bounds)
+{
+	if (!Key.BuildableClass || !Bounds.IsValid)
+	{
+		return;
+	}
+	const FIntVector MinCell = GetCoverageGridCell(Bounds.Min);
+	const FIntVector MaxCell = GetCoverageGridCell(Bounds.Max);
+	for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
+	{
+		for (int32 Y = MinCell.Y; Y <= MaxCell.Y; ++Y)
+		{
+			for (int32 Z = MinCell.Z; Z <= MaxCell.Z; ++Z)
+			{
+				LightweightCoverageGrid.FindOrAdd(FIntVector(X, Y, Z)).Add(Key);
+			}
+		}
+	}
+}
+
+void FNoGrassUnderBuildingsModule::RemoveLightweightFromCoverageGrid(
+	const FNoGrassLightweightKey& Key,
+	const FBox& Bounds)
+{
+	if (!Bounds.IsValid)
+	{
+		return;
+	}
+	const FIntVector MinCell = GetCoverageGridCell(Bounds.Min);
+	const FIntVector MaxCell = GetCoverageGridCell(Bounds.Max);
+	for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
+	{
+		for (int32 Y = MinCell.Y; Y <= MaxCell.Y; ++Y)
+		{
+			for (int32 Z = MinCell.Z; Z <= MaxCell.Z; ++Z)
+			{
+				const FIntVector Cell(X, Y, Z);
+				if (TSet<FNoGrassLightweightKey>* Entries = LightweightCoverageGrid.Find(Cell))
+				{
+					Entries->Remove(Key);
+					if (Entries->IsEmpty())
+					{
+						LightweightCoverageGrid.Remove(Cell);
+					}
+				}
+			}
+		}
+	}
+}
+
+void FNoGrassUnderBuildingsModule::GatherCoverageBounds(
+	const FBox& QueryBounds,
+	TArray<FBox>& OutBounds) const
+{
+	if (!QueryBounds.IsValid)
+	{
+		return;
+	}
+	const FIntVector MinCell = GetCoverageGridCell(QueryBounds.Min);
+	const FIntVector MaxCell = GetCoverageGridCell(QueryBounds.Max);
+	TSet<TWeakObjectPtr<AFGBuildable>> SeenBuildables;
+	TSet<FNoGrassLightweightKey> SeenLightweights;
+	for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
+	{
+		for (int32 Y = MinCell.Y; Y <= MaxCell.Y; ++Y)
+		{
+			for (int32 Z = MinCell.Z; Z <= MaxCell.Z; ++Z)
+			{
+				const FIntVector Cell(X, Y, Z);
+				if (const TSet<TWeakObjectPtr<AFGBuildable>>* Entries = BuildableCoverageGrid.Find(Cell))
+				{
+					for (const TWeakObjectPtr<AFGBuildable>& Key : *Entries)
+					{
+						if (!SeenBuildables.Contains(Key))
+						{
+							SeenBuildables.Add(Key);
+							if (const FBox* Bounds = ExclusionBounds.Find(Key);
+								Bounds && Bounds->IsValid && Bounds->Intersect(QueryBounds))
+							{
+								OutBounds.Add(*Bounds);
+							}
+						}
+					}
+				}
+				if (const TSet<FNoGrassLightweightKey>* Entries = LightweightCoverageGrid.Find(Cell))
+				{
+					for (const FNoGrassLightweightKey& Key : *Entries)
+					{
+						if (!SeenLightweights.Contains(Key))
+						{
+							SeenLightweights.Add(Key);
+							if (const FNoGrassLightweightExclusion* Existing = LightweightExclusions.Find(Key);
+								Existing && Existing->Bounds.IsValid && Existing->Bounds.Intersect(QueryBounds))
+							{
+								OutBounds.Add(Existing->Bounds);
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+bool FNoGrassUnderBuildingsModule::IsLocationCovered(const FVector& Location) const
+{
+	const FIntVector Cell = GetCoverageGridCell(Location);
+	if (const TSet<TWeakObjectPtr<AFGBuildable>>* Entries = BuildableCoverageGrid.Find(Cell))
+	{
+		for (const TWeakObjectPtr<AFGBuildable>& Key : *Entries)
+		{
+			if (const FBox* Bounds = ExclusionBounds.Find(Key);
+				Bounds && Bounds->IsValid && Bounds->IsInsideOrOn(Location))
+			{
+				return true;
+			}
+		}
+	}
+	if (const TSet<FNoGrassLightweightKey>* Entries = LightweightCoverageGrid.Find(Cell))
+	{
+		for (const FNoGrassLightweightKey& Key : *Entries)
+		{
+			if (const FNoGrassLightweightExclusion* Existing = LightweightExclusions.Find(Key);
+				Existing && Existing->Bounds.IsValid && Existing->Bounds.IsInsideOrOn(Location))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 void FNoGrassUnderBuildingsModule::ScanLightweightBuildables(UWorld* World)
 {
 	AFGLightweightBuildableSubsystem* Subsystem = AFGLightweightBuildableSubsystem::Get(World);
@@ -1145,15 +1346,12 @@ void FNoGrassUnderBuildingsModule::AddLightweightExclusion(
 	}
 	WorldBounds = WorldBounds.ExpandBy(FVector(100.0f, 100.0f, 200.0f));
 
-	UNoGrassLightweightExclusionToken* Token =
-		NewObject<UNoGrassLightweightExclusionToken>(GetTransientPackage());
-	if (!IsValid(Token))
-	{
-		return;
-	}
-	Token->AddToRoot();
-	ALandscapeProxy::AddExclusionBox(FWeakObjectPtr(Token), WorldBounds);
-	LightweightExclusions.Add(Key, {Token, WorldBounds, Transform});
+	// Lightweight instances are not UObjects. Keep their coverage as plain data
+	// and filter regenerated landscape/cliff grass through AcceptPrebuiltTree.
+	// A transient UObject owner per instance can exhaust Unreal's global object
+	// table on very large saves.
+	LightweightExclusions.Add(Key, {WorldBounds, Transform});
+	AddLightweightToCoverageGrid(Key, WorldBounds);
 	RefreshBounds.Add(WorldBounds);
 }
 
@@ -1168,16 +1366,11 @@ void FNoGrassUnderBuildingsModule::RemoveLightweightExclusion(
 		return;
 	}
 
-	if (IsValid(Existing->Token))
-	{
-		ALandscapeProxy::RemoveExclusionBox(FWeakObjectPtr(Existing->Token));
-		Existing->Token->RemoveFromRoot();
-		Existing->Token->MarkAsGarbage();
-	}
 	if (World && Existing->Bounds.IsValid)
 	{
 		RefreshBounds.Add(Existing->Bounds);
 	}
+	RemoveLightweightFromCoverageGrid(Key, Existing->Bounds);
 	LightweightExclusions.Remove(Key);
 }
 
@@ -1281,6 +1474,7 @@ void FNoGrassUnderBuildingsModule::AddLandscapeExclusion(
 	ALandscapeProxy::AddExclusionBox(FWeakObjectPtr(Buildable), Bounds);
 	ExcludedBuildables.Add(Owner);
 	ExclusionBounds.Add(Owner, Bounds);
+	AddBuildableToCoverageGrid(Owner, Bounds);
 	if (bRefresh)
 	{
 		RefreshLandscapeGrass(Buildable->GetWorld(), Bounds);
@@ -1299,6 +1493,7 @@ void FNoGrassUnderBuildingsModule::RemoveLandscapeExclusion(
 	}
 
 	ALandscapeProxy::RemoveExclusionBox(FWeakObjectPtr(Buildable));
+	RemoveBuildableFromCoverageGrid(Buildable, PreviousBounds);
 	ExcludedBuildables.Remove(Buildable);
 	ExclusionBounds.Remove(Buildable);
 	if (bRefresh && World && PreviousBounds.IsValid)

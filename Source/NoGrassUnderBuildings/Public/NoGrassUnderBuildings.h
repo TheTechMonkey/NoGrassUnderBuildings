@@ -8,7 +8,6 @@ class AFGBuildable;
 class AFGBuildableSubsystem;
 class AFGCliffActor;
 class AFGLightweightBuildableSubsystem;
-class UNoGrassLightweightExclusionToken;
 class UFGFoliageInstancedSMC;
 class UGrassInstancedStaticMeshComponent;
 class UHierarchicalInstancedStaticMeshComponent;
@@ -51,7 +50,6 @@ struct FNoGrassLightweightKey
 
 struct FNoGrassLightweightExclusion
 {
-	UNoGrassLightweightExclusionToken* Token = nullptr;
 	FBox Bounds{ForceInit};
 	FTransform Transform = FTransform::Identity;
 };
@@ -82,6 +80,13 @@ private:
 	void QueueCoverageRefresh(const FBox& Bounds, const TCHAR* Reason);
 	void ProcessPendingCoverageRefresh(UWorld* World);
 	bool IsHorizontalAreaFullyCovered(const FBox& Bounds) const;
+	FIntVector GetCoverageGridCell(const FVector& Location) const;
+	void AddBuildableToCoverageGrid(const TWeakObjectPtr<AFGBuildable>& Buildable, const FBox& Bounds);
+	void RemoveBuildableFromCoverageGrid(const TWeakObjectPtr<AFGBuildable>& Buildable, const FBox& Bounds);
+	void AddLightweightToCoverageGrid(const FNoGrassLightweightKey& Key, const FBox& Bounds);
+	void RemoveLightweightFromCoverageGrid(const FNoGrassLightweightKey& Key, const FBox& Bounds);
+	void GatherCoverageBounds(const FBox& QueryBounds, TArray<FBox>& OutBounds) const;
+	bool IsLocationCovered(const FVector& Location) const;
 	void ScanBuildables(UWorld* World);
 	void ScanLightweightBuildables(UWorld* World);
 	void AddLightweightExclusion(
@@ -103,7 +108,7 @@ private:
 		int32 OcclusionLayerNum,
 		int32 NumBuiltRenderInstances,
 		const FStaticMeshInstanceData* InstanceData);
-	int32 FilterCliffGrassUpload(
+	int32 FilterGrassUpload(
 		UGrassInstancedStaticMeshComponent* Component,
 		FStaticMeshInstanceData* InstanceData);
 	void ReconcileDecorativeFoliage(
@@ -127,11 +132,13 @@ private:
 	TSet<TWeakObjectPtr<AFGBuildable>> KnownBuildables;
 	TSet<TWeakObjectPtr<AFGBuildable>> ExcludedBuildables;
 	TMap<TWeakObjectPtr<AFGBuildable>, FBox> ExclusionBounds;
+	TMap<FIntVector, TSet<TWeakObjectPtr<AFGBuildable>>> BuildableCoverageGrid;
 	double NextBuildableScanAt = 0.0;
 	bool bInitialBuildableScanComplete = false;
 	int32 LastLightweightClassCount = INDEX_NONE;
 	int32 LastLightweightInstanceCount = INDEX_NONE;
 	TMap<FNoGrassLightweightKey, FNoGrassLightweightExclusion> LightweightExclusions;
+	TMap<FIntVector, TSet<FNoGrassLightweightKey>> LightweightCoverageGrid;
 	TArray<FBox> PendingRefreshBounds;
 	int32 PendingCoverageEventCount = 0;
 	double PendingCoverageQueuedAt = 0.0;
@@ -145,4 +152,5 @@ private:
 	TSet<TWeakObjectPtr<ULevel>> PendingStreamedLevels;
 	uint64 CoverageRevision = 0;
 	uint64 AppliedFoliageRevision = MAX_uint64;
+	static constexpr double CoverageGridCellSize = 2000.0;
 };
