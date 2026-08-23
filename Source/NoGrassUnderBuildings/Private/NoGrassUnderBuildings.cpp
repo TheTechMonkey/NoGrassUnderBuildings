@@ -450,7 +450,8 @@ bool FNoGrassUnderBuildingsModule::IsDecorativeGroundFoliage(
 		MeshPath.Contains(TEXT("GroundCover"), ESearchCase::IgnoreCase) ||
 		MeshPath.Contains(TEXT("Ground_Cover"), ESearchCase::IgnoreCase) ||
 		MeshPath.Contains(TEXT("/SmallFoliage/LowerVegatation/SM_CoverGround_01."), ESearchCase::IgnoreCase) ||
-		MeshPath.Contains(TEXT("/SmallFoliage/LowerVegatation/SM_Plant_07."), ESearchCase::IgnoreCase);
+		MeshPath.Contains(TEXT("/SmallFoliage/LowerVegatation/SM_Plant_07."), ESearchCase::IgnoreCase) ||
+		MeshPath.Contains(TEXT("/SmallFoliage/PlantModular/SM_PlantModular_D."), ESearchCase::IgnoreCase);
 }
 
 void FNoGrassUnderBuildingsModule::ReconcileDecorativeFoliage(
@@ -979,7 +980,8 @@ bool FNoGrassUnderBuildingsModule::IsHorizontalAreaFullyCovered(const FBox& Boun
 	{
 		const FBox& Candidate = Pair.Value;
 		if (Candidate.IsValid && Candidate.Max.X > Bounds.Min.X && Candidate.Min.X < Bounds.Max.X &&
-			Candidate.Max.Y > Bounds.Min.Y && Candidate.Min.Y < Bounds.Max.Y)
+			Candidate.Max.Y > Bounds.Min.Y && Candidate.Min.Y < Bounds.Max.Y &&
+			Candidate.Max.Z > Bounds.Min.Z && Candidate.Min.Z < Bounds.Max.Z)
 		{
 			Candidates.Add(Candidate);
 		}
@@ -988,7 +990,8 @@ bool FNoGrassUnderBuildingsModule::IsHorizontalAreaFullyCovered(const FBox& Boun
 	{
 		const FBox& Candidate = Pair.Value.Bounds;
 		if (Candidate.IsValid && Candidate.Max.X > Bounds.Min.X && Candidate.Min.X < Bounds.Max.X &&
-			Candidate.Max.Y > Bounds.Min.Y && Candidate.Min.Y < Bounds.Max.Y)
+			Candidate.Max.Y > Bounds.Min.Y && Candidate.Min.Y < Bounds.Max.Y &&
+			Candidate.Max.Z > Bounds.Min.Z && Candidate.Min.Z < Bounds.Max.Z)
 		{
 			Candidates.Add(Candidate);
 		}

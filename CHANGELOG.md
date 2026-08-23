@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.3
+
+- Fixed foliage sometimes remaining beneath newly placed foundations when other structures were positioned far above or below the same area.
+- Added support for hiding the previously missed `SM_PlantModular_D` decorative plant.
+- Improved vertical coverage checks so structures at unrelated heights no longer interfere with foliage updates.
+
 ## 1.3.2
 
 - Added a three-dimensional spatial index so grass processing checks only nearby buildings instead of every tracked structure in the save.
