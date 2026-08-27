@@ -67,6 +67,7 @@ private:
 	void HandleWorldCleanup(UWorld* World, bool bSessionEnded, bool bCleanupResources);
 	void HandleWorldPostActorTick(UWorld* World, ELevelTick TickType, float DeltaSeconds);
 	void HandleLevelAddedToWorld(ULevel* Level, UWorld* World);
+	void HandleActorDestroyed(AActor* Actor);
 	void HandleBuildableAdded(AFGBuildableSubsystem* Subsystem, AFGBuildable* Buildable);
 	void HandleBuildableRemoved(AFGBuildableSubsystem* Subsystem, AFGBuildable* Buildable);
 	void HandleLightweightAdded(
@@ -88,6 +89,12 @@ private:
 	void GatherCoverageBounds(const FBox& QueryBounds, TArray<FBox>& OutBounds) const;
 	bool IsLocationCovered(const FVector& Location) const;
 	void ScanBuildables(UWorld* World);
+	void ScanBoundslessPowerPoles(UWorld* World);
+	bool IsBoundslessPowerPole(const AActor* Actor) const;
+	void AddBoundslessPowerPole(AActor* Actor, bool bRefresh = true);
+	void RemoveBoundslessPowerPole(AActor* Actor, bool bRefresh = true);
+	void AddPowerPoleToCoverageGrid(const TWeakObjectPtr<AActor>& Pole, const FBox& Bounds);
+	void RemovePowerPoleFromCoverageGrid(const TWeakObjectPtr<AActor>& Pole, const FBox& Bounds);
 	void ScanLightweightBuildables(UWorld* World);
 	void AddLightweightExclusion(
 		UWorld* World,
@@ -128,11 +135,14 @@ private:
 	FDelegateHandle WorldCleanupHandle;
 	FDelegateHandle WorldPostActorTickHandle;
 	FDelegateHandle LevelAddedToWorldHandle;
+	FDelegateHandle ActorDestroyedHandle;
 	TWeakObjectPtr<UWorld> ActiveGameWorld;
 	TSet<TWeakObjectPtr<AFGBuildable>> KnownBuildables;
 	TSet<TWeakObjectPtr<AFGBuildable>> ExcludedBuildables;
 	TMap<TWeakObjectPtr<AFGBuildable>, FBox> ExclusionBounds;
 	TMap<FIntVector, TSet<TWeakObjectPtr<AFGBuildable>>> BuildableCoverageGrid;
+	TMap<TWeakObjectPtr<AActor>, FBox> PowerPoleExclusionBounds;
+	TMap<FIntVector, TSet<TWeakObjectPtr<AActor>>> PowerPoleCoverageGrid;
 	double NextBuildableScanAt = 0.0;
 	bool bInitialBuildableScanComplete = false;
 	int32 LastLightweightClassCount = INDEX_NONE;

@@ -2,6 +2,7 @@
 
 #include "Buildables/FGBuildable.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
 #include "Engine/Level.h"
 #include "EngineUtils.h"
@@ -143,6 +144,18 @@ void FNoGrassUnderBuildingsModule::ShutdownModule()
 	WorldCleanupHandle.Reset();
 	WorldPostActorTickHandle.Reset();
 	LevelAddedToWorldHandle.Reset();
+	if (UWorld* World = ActiveGameWorld.Get())
+	{
+		if (ActorDestroyedHandle.IsValid())
+		{
+			World->RemoveOnActorDestroyedHandler(ActorDestroyedHandle);
+		}
+		for (const auto& Pair : PowerPoleExclusionBounds)
+		{
+			ALandscapeProxy::RemoveExclusionBox(FWeakObjectPtr(Pair.Key));
+		}
+	}
+	ActorDestroyedHandle.Reset();
 	RestoreAllDecorativeFoliage();
 	ClearLightweightExclusions(ActiveGameWorld.Get(), false);
 	ActiveGameWorld.Reset();
@@ -150,6 +163,8 @@ void FNoGrassUnderBuildingsModule::ShutdownModule()
 	ExcludedBuildables.Empty();
 	ExclusionBounds.Empty();
 	BuildableCoverageGrid.Empty();
+	PowerPoleExclusionBounds.Empty();
+	PowerPoleCoverageGrid.Empty();
 	LastLightweightClassCount = INDEX_NONE;
 	LastLightweightInstanceCount = INDEX_NONE;
 	LightweightCoverageGrid.Empty();
@@ -177,7 +192,7 @@ int32 FNoGrassUnderBuildingsModule::FilterGrassUpload(
 		return 0;
 	}
 
-	if (BuildableCoverageGrid.IsEmpty() && LightweightCoverageGrid.IsEmpty())
+	if (BuildableCoverageGrid.IsEmpty() && LightweightCoverageGrid.IsEmpty() && PowerPoleCoverageGrid.IsEmpty())
 	{
 		return 0;
 	}
@@ -334,6 +349,108 @@ void FNoGrassUnderBuildingsModule::ScanNearbyFoliage(const TArray<FString>& Args
 		TEXT("No Grass Under Buildings foliage scan; center=%s; radius=%.1fm"),
 		*Center.ToCompactString(),
 		RadiusMeters));
+	int32 BuildablesMatched = 0;
+	for (TActorIterator<AFGBuildable> It(World); It; ++It)
+	{
+		AFGBuildable* Buildable = *It;
+		if (!IsValid(Buildable))
+		{
+			continue;
+		}
+
+		const FBox RawBounds = Buildable->GetComponentsBoundingBox(true);
+		if (!RawBounds.IsValid || RawBounds.ComputeSquaredDistanceToPoint(Center) > RadiusSquared)
+		{
+			continue;
+		}
+
+		++BuildablesMatched;
+		const FBox ExpandedBounds = RawBounds.ExpandBy(FVector(100.0f, 100.0f, 200.0f));
+		Lines.Add(FString::Printf(
+			TEXT("buildable class=%s location=%s raw-bounds=%s expanded-bounds=%s"),
+			*GetNameSafe(Buildable->GetClass()),
+			*Buildable->GetActorLocation().ToCompactString(),
+			*RawBounds.ToString(),
+			*ExpandedBounds.ToString()));
+	}
+	int32 LightweightBuildablesMatched = 0;
+	for (const auto& Pair : LightweightExclusions)
+	{
+		const FNoGrassLightweightKey& Key = Pair.Key;
+		const FNoGrassLightweightExclusion& Exclusion = Pair.Value;
+		if (!Exclusion.Bounds.IsValid ||
+			Exclusion.Bounds.ComputeSquaredDistanceToPoint(Center) > RadiusSquared)
+		{
+			continue;
+		}
+
+		++LightweightBuildablesMatched;
+		Lines.Add(FString::Printf(
+			TEXT("lightweight class=%s runtime-index=%d location=%s expanded-bounds=%s"),
+			*GetNameSafe(Key.BuildableClass),
+			Key.RuntimeIndex,
+			*Exclusion.Transform.GetLocation().ToCompactString(),
+			*Exclusion.Bounds.ToString()));
+	}
+	int32 BoundslessPowerPolesMatched = 0;
+	for (const auto& Pair : PowerPoleExclusionBounds)
+	{
+		if (!Pair.Value.IsValid || Pair.Value.ComputeSquaredDistanceToPoint(Center) > RadiusSquared)
+		{
+			continue;
+		}
+		++BoundslessPowerPolesMatched;
+		Lines.Add(FString::Printf(
+			TEXT("boundsless-power-pole class=%s location=%s fallback-bounds=%s"),
+			Pair.Key.IsValid() ? *GetNameSafe(Pair.Key->GetClass()) : TEXT("<invalid>"),
+			Pair.Key.IsValid() ? *Pair.Key->GetActorLocation().ToCompactString() : TEXT("<invalid>"),
+			*Pair.Value.ToString()));
+	}
+	int32 NearbyActorsMatched = 0;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		AActor* Actor = *It;
+		if (!IsValid(Actor))
+		{
+			continue;
+		}
+
+		const FBox ActorBounds = Actor->GetComponentsBoundingBox(true);
+		const bool bLocationNearby = FVector::DistSquared(Actor->GetActorLocation(), Center) <= RadiusSquared;
+		const bool bBoundsNearby = ActorBounds.IsValid &&
+			ActorBounds.ComputeSquaredDistanceToPoint(Center) <= RadiusSquared;
+		if (!bLocationNearby && !bBoundsNearby)
+		{
+			continue;
+		}
+
+		++NearbyActorsMatched;
+		Lines.Add(FString::Printf(
+			TEXT("nearby-actor class=%s name=%s location=%s bounds=%s"),
+			*GetNameSafe(Actor->GetClass()),
+			*Actor->GetPathName(),
+			*Actor->GetActorLocation().ToCompactString(),
+			*ActorBounds.ToString()));
+	}
+	int32 NearbyPrimitiveComponentsMatched = 0;
+	for (TObjectIterator<UPrimitiveComponent> It; It; ++It)
+	{
+		UPrimitiveComponent* Component = *It;
+		if (!IsValid(Component) || Component->GetWorld() != World || !Component->IsRegistered() ||
+			Component->Bounds.GetBox().ComputeSquaredDistanceToPoint(Center) > RadiusSquared)
+		{
+			continue;
+		}
+
+		++NearbyPrimitiveComponentsMatched;
+		Lines.Add(FString::Printf(
+			TEXT("nearby-component class=%s name=%s owner-class=%s owner=%s bounds=%s"),
+			*GetNameSafe(Component->GetClass()),
+			*Component->GetPathName(),
+			Component->GetOwner() ? *GetNameSafe(Component->GetOwner()->GetClass()) : TEXT("<none>"),
+			Component->GetOwner() ? *Component->GetOwner()->GetPathName() : TEXT("<none>"),
+			*Component->Bounds.GetBox().ToString()));
+	}
 	int32 ComponentsMatched = 0;
 	int32 InstancesMatched = 0;
 	int32 CliffComponentsMatched = 0;
@@ -386,14 +503,21 @@ void FNoGrassUnderBuildingsModule::ScanNearbyFoliage(const TArray<FString>& Args
 		InstancesMatched += NearbyInstances;
 		const UStaticMesh* Mesh = Component->GetStaticMesh();
 		Lines.Add(FString::Printf(
-			TEXT("instances=%d component=%s owner=%s mesh=%s"),
+			TEXT("instances=%d component=%s owner=%s mesh=%s mesh-extent=%s filtered=%s"),
 			NearbyInstances,
 			*Component->GetPathName(),
 			Component->GetOwner() ? *Component->GetOwner()->GetPathName() : TEXT("<none>"),
-			Mesh ? *Mesh->GetPathName() : TEXT("<none>")));
+			Mesh ? *Mesh->GetPathName() : TEXT("<none>"),
+			Mesh ? *Mesh->GetBounds().BoxExtent.ToCompactString() : TEXT("<none>"),
+			IsDecorativeGroundFoliage(Component) ? TEXT("true") : TEXT("false")));
 	}
 	Lines.Add(FString::Printf(
-		TEXT("summary: components=%d instances=%d cliff-components=%d"),
+		TEXT("summary: buildables=%d lightweight-buildables=%d boundsless-power-poles=%d nearby-actors=%d nearby-primitive-components=%d components=%d instances=%d cliff-components=%d"),
+		BuildablesMatched,
+		LightweightBuildablesMatched,
+		BoundslessPowerPolesMatched,
+		NearbyActorsMatched,
+		NearbyPrimitiveComponentsMatched,
 		ComponentsMatched,
 		InstancesMatched,
 		CliffComponentsMatched));
@@ -692,19 +816,31 @@ void FNoGrassUnderBuildingsModule::HandlePostWorldInitialization(
 	{
 		if (UWorld* PreviousWorld = ActiveGameWorld.Get(); PreviousWorld && PreviousWorld != World)
 		{
+			if (ActorDestroyedHandle.IsValid())
+			{
+				PreviousWorld->RemoveOnActorDestroyedHandler(ActorDestroyedHandle);
+			}
+			for (const auto& Pair : PowerPoleExclusionBounds)
+			{
+				ALandscapeProxy::RemoveExclusionBox(FWeakObjectPtr(Pair.Key));
+			}
 			RestoreAllDecorativeFoliage();
 			ClearLightweightExclusions(PreviousWorld, false);
 		}
 		ActiveGameWorld = World;
+		ActorDestroyedHandle = World->AddOnActorDestroyedHandler(
+			FOnActorDestroyed::FDelegate::CreateRaw(this, &FNoGrassUnderBuildingsModule::HandleActorDestroyed));
 		KnownBuildables.Empty();
 		ExcludedBuildables.Empty();
-	ExclusionBounds.Empty();
-	BuildableCoverageGrid.Empty();
+		ExclusionBounds.Empty();
+		BuildableCoverageGrid.Empty();
+		PowerPoleExclusionBounds.Empty();
+		PowerPoleCoverageGrid.Empty();
 		NextBuildableScanAt = 0.0;
 		bInitialBuildableScanComplete = false;
 		LastLightweightClassCount = INDEX_NONE;
-	LastLightweightInstanceCount = INDEX_NONE;
-	LightweightCoverageGrid.Empty();
+		LastLightweightInstanceCount = INDEX_NONE;
+		LightweightCoverageGrid.Empty();
 		PendingRefreshBounds.Empty();
 		PendingCoverageEventCount = 0;
 		PendingCoverageQueuedAt = 0.0;
@@ -737,6 +873,15 @@ void FNoGrassUnderBuildingsModule::HandleWorldCleanup(
 		{
 			ALandscapeProxy::RemoveExclusionBox(FWeakObjectPtr(Buildable));
 		}
+		for (const auto& Pair : PowerPoleExclusionBounds)
+		{
+			ALandscapeProxy::RemoveExclusionBox(FWeakObjectPtr(Pair.Key));
+		}
+		if (ActorDestroyedHandle.IsValid())
+		{
+			World->RemoveOnActorDestroyedHandler(ActorDestroyedHandle);
+			ActorDestroyedHandle.Reset();
+		}
 		RestoreAllDecorativeFoliage();
 		ClearLightweightExclusions(World, false);
 		ActiveGameWorld.Reset();
@@ -744,6 +889,8 @@ void FNoGrassUnderBuildingsModule::HandleWorldCleanup(
 		ExcludedBuildables.Empty();
 		ExclusionBounds.Empty();
 		BuildableCoverageGrid.Empty();
+		PowerPoleExclusionBounds.Empty();
+		PowerPoleCoverageGrid.Empty();
 		NextBuildableScanAt = 0.0;
 		bInitialBuildableScanComplete = false;
 		LastLightweightClassCount = INDEX_NONE;
@@ -775,6 +922,7 @@ void FNoGrassUnderBuildingsModule::HandleWorldPostActorTick(
 	{
 		ScanBuildables(World);
 		ScanLightweightBuildables(World);
+		ScanBoundslessPowerPoles(World);
 		if (AppliedFoliageRevision != CoverageRevision)
 		{
 			ReconcileDecorativeFoliage(World);
@@ -796,6 +944,106 @@ void FNoGrassUnderBuildingsModule::HandleWorldPostActorTick(
 	ProcessPendingStreamedFoliage(World);
 }
 
+bool FNoGrassUnderBuildingsModule::IsBoundslessPowerPole(const AActor* Actor) const
+{
+	return IsValid(Actor) &&
+		Actor->GetClass()->GetName().StartsWith(TEXT("Build_PowerPole")) &&
+		!Actor->GetComponentsBoundingBox(true).IsValid;
+}
+
+void FNoGrassUnderBuildingsModule::HandleActorDestroyed(AActor* Actor)
+{
+	if (Actor && PowerPoleExclusionBounds.Contains(TWeakObjectPtr<AActor>(Actor)))
+	{
+		RemoveBoundslessPowerPole(Actor, true);
+	}
+}
+
+void FNoGrassUnderBuildingsModule::ScanBoundslessPowerPoles(UWorld* World)
+{
+	if (!World)
+	{
+		return;
+	}
+
+	TArray<FBox> InitialRefreshBounds;
+	int32 Added = 0;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		AActor* Actor = *It;
+		const TWeakObjectPtr<AActor> Key(Actor);
+		if (!IsBoundslessPowerPole(Actor) || PowerPoleExclusionBounds.Contains(Key))
+		{
+			continue;
+		}
+
+		AddBoundslessPowerPole(Actor, false);
+		if (const FBox* Bounds = PowerPoleExclusionBounds.Find(Key))
+		{
+			InitialRefreshBounds.Add(*Bounds);
+			++Added;
+		}
+	}
+
+	if (!InitialRefreshBounds.IsEmpty())
+	{
+		RefreshLandscapeGrass(World, InitialRefreshBounds);
+		++CoverageRevision;
+	}
+	UE_LOG(LogNoGrassUnderBuildings, Display, TEXT("Bounds-less power pole scan: added=%d tracked=%d"),
+		Added, PowerPoleExclusionBounds.Num());
+}
+
+void FNoGrassUnderBuildingsModule::AddBoundslessPowerPole(AActor* Actor, bool bRefresh)
+{
+	if (!IsBoundslessPowerPole(Actor))
+	{
+		return;
+	}
+
+	const TWeakObjectPtr<AActor> Key(Actor);
+	if (PowerPoleExclusionBounds.Contains(Key))
+	{
+		return;
+	}
+
+	const FVector Center = Actor->GetActorLocation();
+	const FBox Bounds(
+		Center - FVector(125.0f, 125.0f, 200.0f),
+		Center + FVector(125.0f, 125.0f, 200.0f));
+	ALandscapeProxy::AddExclusionBox(FWeakObjectPtr(Actor), Bounds);
+	PowerPoleExclusionBounds.Add(Key, Bounds);
+	AddPowerPoleToCoverageGrid(Key, Bounds);
+	if (bRefresh)
+	{
+		QueueCoverageRefresh(Bounds, TEXT("boundsless-power-pole-added"));
+	}
+}
+
+void FNoGrassUnderBuildingsModule::RemoveBoundslessPowerPole(AActor* Actor, bool bRefresh)
+{
+	if (!Actor)
+	{
+		return;
+	}
+
+	const TWeakObjectPtr<AActor> Key(Actor);
+	const FBox* StoredBounds = PowerPoleExclusionBounds.Find(Key);
+	if (!StoredBounds)
+	{
+		return;
+	}
+
+	const FBox PreviousBounds = *StoredBounds;
+	ALandscapeProxy::RemoveExclusionBox(FWeakObjectPtr(Actor));
+	RemovePowerPoleFromCoverageGrid(Key, PreviousBounds);
+	PowerPoleExclusionBounds.Remove(Key);
+	if (bRefresh)
+	{
+		QueueCoverageRefresh(PreviousBounds, TEXT("boundsless-power-pole-removed"));
+	}
+}
+
 void FNoGrassUnderBuildingsModule::HandleBuildableAdded(
 	AFGBuildableSubsystem* Subsystem,
 	AFGBuildable* Buildable)
@@ -806,7 +1054,11 @@ void FNoGrassUnderBuildingsModule::HandleBuildableAdded(
 	{
 		return;
 	}
-
+	if (IsBoundslessPowerPole(Buildable))
+	{
+		AddBoundslessPowerPole(Buildable, true);
+		return;
+	}
 	const TWeakObjectPtr<AFGBuildable> Key(Buildable);
 	if (ExclusionBounds.Contains(Key))
 	{
@@ -875,7 +1127,6 @@ void FNoGrassUnderBuildingsModule::HandleLightweightAdded(
 	{
 		return;
 	}
-
 	const FBox Bounds = RuntimeData->BoundingBox.TransformBy(RuntimeData->Transform).ExpandBy(
 		FVector(100.0f, 100.0f, 200.0f));
 	const bool bAlreadyCovered = IsHorizontalAreaFullyCovered(Bounds);
@@ -1103,6 +1354,58 @@ void FNoGrassUnderBuildingsModule::RemoveBuildableFromCoverageGrid(
 	}
 }
 
+void FNoGrassUnderBuildingsModule::AddPowerPoleToCoverageGrid(
+	const TWeakObjectPtr<AActor>& Pole,
+	const FBox& Bounds)
+{
+	if (!Pole.IsValid() || !Bounds.IsValid)
+	{
+		return;
+	}
+	const FIntVector MinCell = GetCoverageGridCell(Bounds.Min);
+	const FIntVector MaxCell = GetCoverageGridCell(Bounds.Max);
+	for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
+	{
+		for (int32 Y = MinCell.Y; Y <= MaxCell.Y; ++Y)
+		{
+			for (int32 Z = MinCell.Z; Z <= MaxCell.Z; ++Z)
+			{
+				PowerPoleCoverageGrid.FindOrAdd(FIntVector(X, Y, Z)).Add(Pole);
+			}
+		}
+	}
+}
+
+void FNoGrassUnderBuildingsModule::RemovePowerPoleFromCoverageGrid(
+	const TWeakObjectPtr<AActor>& Pole,
+	const FBox& Bounds)
+{
+	if (!Bounds.IsValid)
+	{
+		return;
+	}
+	const FIntVector MinCell = GetCoverageGridCell(Bounds.Min);
+	const FIntVector MaxCell = GetCoverageGridCell(Bounds.Max);
+	for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
+	{
+		for (int32 Y = MinCell.Y; Y <= MaxCell.Y; ++Y)
+		{
+			for (int32 Z = MinCell.Z; Z <= MaxCell.Z; ++Z)
+			{
+				const FIntVector Cell(X, Y, Z);
+				if (TSet<TWeakObjectPtr<AActor>>* Entries = PowerPoleCoverageGrid.Find(Cell))
+				{
+					Entries->Remove(Pole);
+					if (Entries->IsEmpty())
+					{
+						PowerPoleCoverageGrid.Remove(Cell);
+					}
+				}
+			}
+		}
+	}
+}
+
 void FNoGrassUnderBuildingsModule::AddLightweightToCoverageGrid(
 	const FNoGrassLightweightKey& Key,
 	const FBox& Bounds)
@@ -1167,6 +1470,7 @@ void FNoGrassUnderBuildingsModule::GatherCoverageBounds(
 	const FIntVector MaxCell = GetCoverageGridCell(QueryBounds.Max);
 	TSet<TWeakObjectPtr<AFGBuildable>> SeenBuildables;
 	TSet<FNoGrassLightweightKey> SeenLightweights;
+	TSet<TWeakObjectPtr<AActor>> SeenPowerPoles;
 	for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
 	{
 		for (int32 Y = MinCell.Y; Y <= MaxCell.Y; ++Y)
@@ -1204,6 +1508,21 @@ void FNoGrassUnderBuildingsModule::GatherCoverageBounds(
 						}
 					}
 				}
+				if (const TSet<TWeakObjectPtr<AActor>>* Entries = PowerPoleCoverageGrid.Find(Cell))
+				{
+					for (const TWeakObjectPtr<AActor>& Key : *Entries)
+					{
+						if (!SeenPowerPoles.Contains(Key))
+						{
+							SeenPowerPoles.Add(Key);
+							if (const FBox* Bounds = PowerPoleExclusionBounds.Find(Key);
+								Bounds && Bounds->IsValid && Bounds->Intersect(QueryBounds))
+							{
+								OutBounds.Add(*Bounds);
+							}
+						}
+					}
+				}
 			}
 		}
 	}
@@ -1229,6 +1548,17 @@ bool FNoGrassUnderBuildingsModule::IsLocationCovered(const FVector& Location) co
 		{
 			if (const FNoGrassLightweightExclusion* Existing = LightweightExclusions.Find(Key);
 				Existing && Existing->Bounds.IsValid && Existing->Bounds.IsInsideOrOn(Location))
+			{
+				return true;
+			}
+		}
+	}
+	if (const TSet<TWeakObjectPtr<AActor>>* Entries = PowerPoleCoverageGrid.Find(Cell))
+	{
+		for (const TWeakObjectPtr<AActor>& Key : *Entries)
+		{
+			if (const FBox* Bounds = PowerPoleExclusionBounds.Find(Key);
+				Bounds && Bounds->IsValid && Bounds->IsInsideOrOn(Location))
 			{
 				return true;
 			}

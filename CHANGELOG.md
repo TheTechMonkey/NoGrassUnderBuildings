@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.4
+
+- Added reliable foliage exclusion around power poles that do not report usable component bounds.
+- Updated foliage immediately when affected power poles are placed or dismantled.
+- Integrated power-pole coverage into the existing nearby spatial index to avoid recurring scans.
+
 ## 1.3.3
 
 - Fixed foliage sometimes remaining beneath newly placed foundations when other structures were positioned far above or below the same area.
