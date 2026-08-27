@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.5
+
+- Fixed packaged module manifests so the mod loads correctly through Satisfactory Mod Manager on Steam, Epic, Windows dedicated servers, and Linux dedicated servers.
+- No gameplay behavior changed from 1.3.4.
+
 ## 1.3.4
 
 - Added reliable foliage exclusion around power poles that do not report usable component bounds.
