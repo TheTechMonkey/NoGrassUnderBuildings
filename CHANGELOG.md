@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.6
+
+- Fixed the Space Elevator clearing vegetation across an enormous area because of its orbital actor bounds.
+- Added a collision-derived Space Elevator footprint that follows its visible feet and supports rotated placement.
+- Included a small vegetation-contact margin so leaning grass blades do not protrude into the Elevator's feet.
+- Embedded the tested footprint as a compact lookup table, eliminating runtime collision scans and their load-time delay.
+- Preserved event-driven updates, nearby spatial filtering, and the UObject-free tracking introduced in earlier releases.
+
 ## 1.3.5
 
 - Fixed packaged module manifests so the mod loads correctly through Satisfactory Mod Manager on Steam, Epic, Windows dedicated servers, and Linux dedicated servers.

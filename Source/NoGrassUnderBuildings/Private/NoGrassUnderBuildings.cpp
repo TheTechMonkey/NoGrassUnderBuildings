@@ -23,6 +23,7 @@
 #include "UObject/UObjectIterator.h"
 #include "LandscapeComponent.h"
 #include "LandscapeProxy.h"
+#include "SpaceElevatorFootprint.inl"
 
 DEFINE_LOG_CATEGORY(LogNoGrassUnderBuildings);
 
@@ -150,6 +151,10 @@ void FNoGrassUnderBuildingsModule::ShutdownModule()
 		{
 			World->RemoveOnActorDestroyedHandler(ActorDestroyedHandle);
 		}
+		for (const TWeakObjectPtr<AFGBuildable>& Buildable : ExcludedBuildables)
+		{
+			ALandscapeProxy::RemoveExclusionBox(FWeakObjectPtr(Buildable));
+		}
 		for (const auto& Pair : PowerPoleExclusionBounds)
 		{
 			ALandscapeProxy::RemoveExclusionBox(FWeakObjectPtr(Pair.Key));
@@ -162,6 +167,7 @@ void FNoGrassUnderBuildingsModule::ShutdownModule()
 	KnownBuildables.Empty();
 	ExcludedBuildables.Empty();
 	ExclusionBounds.Empty();
+	CollisionFootprints.Empty();
 	BuildableCoverageGrid.Empty();
 	PowerPoleExclusionBounds.Empty();
 	PowerPoleCoverageGrid.Empty();
@@ -365,13 +371,16 @@ void FNoGrassUnderBuildingsModule::ScanNearbyFoliage(const TArray<FString>& Args
 		}
 
 		++BuildablesMatched;
-		const FBox ExpandedBounds = RawBounds.ExpandBy(FVector(100.0f, 100.0f, 200.0f));
+		const FBox EffectiveBounds = GetLandscapeExclusionBounds(Buildable);
+		const bool bPhysicalFootprint =
+			Buildable->GetClass()->GetName() == TEXT("Build_SpaceElevator_C");
 		Lines.Add(FString::Printf(
-			TEXT("buildable class=%s location=%s raw-bounds=%s expanded-bounds=%s"),
+			TEXT("buildable class=%s location=%s raw-bounds=%s candidate-bounds=%s footprint=%s"),
 			*GetNameSafe(Buildable->GetClass()),
 			*Buildable->GetActorLocation().ToCompactString(),
 			*RawBounds.ToString(),
-			*ExpandedBounds.ToString()));
+			*EffectiveBounds.ToString(),
+			bPhysicalFootprint ? TEXT("MainMeshCollision") : TEXT("Bounds")));
 	}
 	int32 LightweightBuildablesMatched = 0;
 	for (const auto& Pair : LightweightExclusions)
@@ -485,6 +494,7 @@ void FNoGrassUnderBuildingsModule::ScanNearbyFoliage(const TArray<FString>& Args
 		}
 
 		int32 NearbyInstances = 0;
+		TArray<FString> NearbyInstanceLines;
 		FTransform InstanceTransform;
 		for (int32 Index = 0; Index < Component->GetInstanceCount(); ++Index)
 		{
@@ -492,6 +502,12 @@ void FNoGrassUnderBuildingsModule::ScanNearbyFoliage(const TArray<FString>& Args
 				FVector::DistSquared(InstanceTransform.GetLocation(), Center) <= RadiusSquared)
 			{
 				++NearbyInstances;
+				NearbyInstanceLines.Add(FString::Printf(
+					TEXT("  instance-index=%d location=%s scale=%s covered=%s"),
+					Index,
+					*InstanceTransform.GetLocation().ToCompactString(),
+					*InstanceTransform.GetScale3D().ToCompactString(),
+					IsLocationCovered(InstanceTransform.GetLocation()) ? TEXT("true") : TEXT("false")));
 			}
 		}
 		if (NearbyInstances <= 0)
@@ -510,6 +526,7 @@ void FNoGrassUnderBuildingsModule::ScanNearbyFoliage(const TArray<FString>& Args
 			Mesh ? *Mesh->GetPathName() : TEXT("<none>"),
 			Mesh ? *Mesh->GetBounds().BoxExtent.ToCompactString() : TEXT("<none>"),
 			IsDecorativeGroundFoliage(Component) ? TEXT("true") : TEXT("false")));
+		Lines.Append(NearbyInstanceLines);
 	}
 	Lines.Add(FString::Printf(
 		TEXT("summary: buildables=%d lightweight-buildables=%d boundsless-power-poles=%d nearby-actors=%d nearby-primitive-components=%d components=%d instances=%d cliff-components=%d"),
@@ -610,7 +627,12 @@ void FNoGrassUnderBuildingsModule::ReconcileDecorativeFoliage(
 			}
 			for (const int32 InstanceIndex : Component->GetInstancesOverlappingBox(Bounds, true))
 			{
-				DesiredSuppression.Add({Component, InstanceIndex});
+				FTransform InstanceTransform;
+				if (Component->GetInstanceTransform(InstanceIndex, InstanceTransform, true) &&
+					IsLocationCovered(InstanceTransform.GetLocation()))
+				{
+					DesiredSuppression.Add({Component, InstanceIndex});
+				}
 			}
 		}
 	}
@@ -820,6 +842,10 @@ void FNoGrassUnderBuildingsModule::HandlePostWorldInitialization(
 			{
 				PreviousWorld->RemoveOnActorDestroyedHandler(ActorDestroyedHandle);
 			}
+			for (const TWeakObjectPtr<AFGBuildable>& Buildable : ExcludedBuildables)
+			{
+				ALandscapeProxy::RemoveExclusionBox(FWeakObjectPtr(Buildable));
+			}
 			for (const auto& Pair : PowerPoleExclusionBounds)
 			{
 				ALandscapeProxy::RemoveExclusionBox(FWeakObjectPtr(Pair.Key));
@@ -833,6 +859,7 @@ void FNoGrassUnderBuildingsModule::HandlePostWorldInitialization(
 		KnownBuildables.Empty();
 		ExcludedBuildables.Empty();
 		ExclusionBounds.Empty();
+		CollisionFootprints.Empty();
 		BuildableCoverageGrid.Empty();
 		PowerPoleExclusionBounds.Empty();
 		PowerPoleCoverageGrid.Empty();
@@ -888,6 +915,7 @@ void FNoGrassUnderBuildingsModule::HandleWorldCleanup(
 		KnownBuildables.Empty();
 		ExcludedBuildables.Empty();
 		ExclusionBounds.Empty();
+		CollisionFootprints.Empty();
 		BuildableCoverageGrid.Empty();
 		PowerPoleExclusionBounds.Empty();
 		PowerPoleCoverageGrid.Empty();
@@ -1065,8 +1093,11 @@ void FNoGrassUnderBuildingsModule::HandleBuildableAdded(
 		return;
 	}
 
-	const FBox Bounds = Buildable->GetComponentsBoundingBox(true).ExpandBy(
-		FVector(100.0f, 100.0f, 200.0f));
+	const FBox Bounds = GetLandscapeExclusionBounds(Buildable);
+	if (!Bounds.IsValid)
+	{
+		return;
+	}
 	const bool bAlreadyCovered = IsHorizontalAreaFullyCovered(Bounds);
 	KnownBuildables.Add(Key);
 	AddLandscapeExclusion(Buildable, false);
@@ -1227,25 +1258,27 @@ bool FNoGrassUnderBuildingsModule::IsHorizontalAreaFullyCovered(const FBox& Boun
 	}
 
 	TArray<FBox> Candidates;
-	for (const auto& Pair : ExclusionBounds)
+	auto AddCandidate = [&Candidates, &Bounds](const FBox& Candidate)
 	{
-		const FBox& Candidate = Pair.Value;
 		if (Candidate.IsValid && Candidate.Max.X > Bounds.Min.X && Candidate.Min.X < Bounds.Max.X &&
 			Candidate.Max.Y > Bounds.Min.Y && Candidate.Min.Y < Bounds.Max.Y &&
 			Candidate.Max.Z > Bounds.Min.Z && Candidate.Min.Z < Bounds.Max.Z)
 		{
 			Candidates.Add(Candidate);
+		}
+	};
+	for (const auto& Pair : ExclusionBounds)
+	{
+		// A physical collision footprint is not a filled rectangle, so it cannot
+		// prove that an entire horizontal area is already covered.
+		if (!CollisionFootprints.Contains(Pair.Key))
+		{
+			AddCandidate(Pair.Value);
 		}
 	}
 	for (const auto& Pair : LightweightExclusions)
 	{
-		const FBox& Candidate = Pair.Value.Bounds;
-		if (Candidate.IsValid && Candidate.Max.X > Bounds.Min.X && Candidate.Min.X < Bounds.Max.X &&
-			Candidate.Max.Y > Bounds.Min.Y && Candidate.Min.Y < Bounds.Max.Y &&
-			Candidate.Max.Z > Bounds.Min.Z && Candidate.Min.Z < Bounds.Max.Z)
-		{
-			Candidates.Add(Candidate);
-		}
+		AddCandidate(Pair.Value.Bounds);
 	}
 	if (Candidates.IsEmpty())
 	{
@@ -1535,7 +1568,14 @@ bool FNoGrassUnderBuildingsModule::IsLocationCovered(const FVector& Location) co
 	{
 		for (const TWeakObjectPtr<AFGBuildable>& Key : *Entries)
 		{
-			if (const FBox* Bounds = ExclusionBounds.Find(Key);
+			if (CollisionFootprints.Contains(Key))
+			{
+				if (IsCollisionFootprintCovered(Key, Location))
+				{
+					return true;
+				}
+			}
+			else if (const FBox* Bounds = ExclusionBounds.Find(Key);
 				Bounds && Bounds->IsValid && Bounds->IsInsideOrOn(Location))
 			{
 				return true;
@@ -1787,6 +1827,74 @@ void FNoGrassUnderBuildingsModule::ScanBuildables(UWorld* World)
 	}
 }
 
+FBox FNoGrassUnderBuildingsModule::GetLandscapeExclusionBounds(AFGBuildable* Buildable) const
+{
+	if (!IsValid(Buildable))
+	{
+		return FBox(ForceInit);
+	}
+
+	FBox RawBounds = Buildable->GetComponentsBoundingBox(true);
+	const bool bSpaceElevator = Buildable->GetClass()->GetName() == TEXT("Build_SpaceElevator_C");
+	if (bSpaceElevator)
+	{
+		static const FName MainMeshName(TEXT("MainMesh"));
+		TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(Buildable);
+		for (UPrimitiveComponent* Component : PrimitiveComponents)
+		{
+			if (!IsValid(Component) || Component->GetFName() != MainMeshName)
+			{
+				continue;
+			}
+			const FBox MainMeshBounds = Component->Bounds.GetBox();
+			if (MainMeshBounds.IsValid)
+			{
+				RawBounds = MainMeshBounds;
+			}
+			break;
+		}
+	}
+
+	if (!RawBounds.IsValid)
+	{
+		return FBox(ForceInit);
+	}
+	// The precomputed physical mask includes the visible reach of nearby grass.
+	// Keep its world-space query bounds large enough for those outer cells.
+	return RawBounds.ExpandBy(
+		bSpaceElevator
+			? FVector(200.0f, 200.0f, 200.0f)
+			: FVector(100.0f, 100.0f, 200.0f));
+}
+
+bool FNoGrassUnderBuildingsModule::IsCollisionFootprintCovered(
+	const TWeakObjectPtr<AFGBuildable>& Buildable,
+	const FVector& Location) const
+{
+	const FNoGrassCollisionFootprint* Footprint = CollisionFootprints.Find(Buildable);
+	if (!Footprint || !Footprint->Bounds.IsInsideXY(Location))
+	{
+		return false;
+	}
+
+	const FVector LocalLocation = Footprint->ComponentTransform.InverseTransformPosition(Location);
+	const int32 LocalCellX =
+		FMath::FloorToInt(LocalLocation.X / CollisionFootprintCellSize) -
+		GNoGrassSpaceElevatorMinCellX;
+	const int32 LocalCellY =
+		FMath::FloorToInt(LocalLocation.Y / CollisionFootprintCellSize) -
+		GNoGrassSpaceElevatorMinCellY;
+	if (LocalCellX < 0 || LocalCellX >= GNoGrassSpaceElevatorCellCountX ||
+		LocalCellY < 0 || LocalCellY >= GNoGrassSpaceElevatorCellCountY)
+	{
+		return false;
+	}
+
+	const FNoGrassSpaceElevatorFootprintRow& Row = GNoGrassSpaceElevatorRows[LocalCellY];
+	return (LocalCellX >= Row.MinA && LocalCellX <= Row.MaxA) ||
+		(Row.MinB != GNoGrassNoRun && LocalCellX >= Row.MinB && LocalCellX <= Row.MaxB);
+}
+
 void FNoGrassUnderBuildingsModule::AddLandscapeExclusion(
 	AFGBuildable* Buildable,
 	bool bRefresh)
@@ -1796,15 +1904,45 @@ void FNoGrassUnderBuildingsModule::AddLandscapeExclusion(
 		return;
 	}
 
-	const FBox Bounds = Buildable->GetComponentsBoundingBox(true).ExpandBy(
-		FVector(100.0f, 100.0f, 200.0f));
+	const FBox Bounds = GetLandscapeExclusionBounds(Buildable);
 	if (!Bounds.IsValid)
 	{
 		return;
 	}
 
 	const TWeakObjectPtr<AFGBuildable> Owner(Buildable);
-	ALandscapeProxy::AddExclusionBox(FWeakObjectPtr(Buildable), Bounds);
+	UPrimitiveComponent* CollisionComponent = nullptr;
+	if (Buildable->GetClass()->GetName() == TEXT("Build_SpaceElevator_C"))
+	{
+		static const FName MainMeshName(TEXT("MainMesh"));
+		TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(Buildable);
+		for (UPrimitiveComponent* Component : PrimitiveComponents)
+		{
+			if (IsValid(Component) && Component->GetFName() == MainMeshName)
+			{
+				CollisionComponent = Component;
+				break;
+			}
+		}
+	}
+
+	if (CollisionComponent)
+	{
+		FNoGrassCollisionFootprint Footprint;
+		Footprint.Bounds = Bounds;
+		Footprint.ComponentTransform = CollisionComponent->GetComponentTransform();
+		CollisionFootprints.Add(Owner, Footprint);
+		UE_LOG(
+			LogNoGrassUnderBuildings,
+			Display,
+			TEXT("Precomputed physical footprint ready: class=%s occupied=%d"),
+			*GetNameSafe(Buildable->GetClass()),
+			GNoGrassSpaceElevatorOccupiedCellCount);
+	}
+	else
+	{
+		ALandscapeProxy::AddExclusionBox(FWeakObjectPtr(Buildable), Bounds);
+	}
 	ExcludedBuildables.Add(Owner);
 	ExclusionBounds.Add(Owner, Bounds);
 	AddBuildableToCoverageGrid(Owner, Bounds);
@@ -1825,10 +1963,14 @@ void FNoGrassUnderBuildingsModule::RemoveLandscapeExclusion(
 		PreviousBounds = *StoredBounds;
 	}
 
-	ALandscapeProxy::RemoveExclusionBox(FWeakObjectPtr(Buildable));
+	if (!CollisionFootprints.Contains(Buildable))
+	{
+		ALandscapeProxy::RemoveExclusionBox(FWeakObjectPtr(Buildable));
+	}
 	RemoveBuildableFromCoverageGrid(Buildable, PreviousBounds);
 	ExcludedBuildables.Remove(Buildable);
 	ExclusionBounds.Remove(Buildable);
+	CollisionFootprints.Remove(Buildable);
 	if (bRefresh && World && PreviousBounds.IsValid)
 	{
 		RefreshLandscapeGrass(World, PreviousBounds);

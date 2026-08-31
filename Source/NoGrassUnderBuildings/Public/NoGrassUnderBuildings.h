@@ -11,6 +11,7 @@ class AFGLightweightBuildableSubsystem;
 class UFGFoliageInstancedSMC;
 class UGrassInstancedStaticMeshComponent;
 class UHierarchicalInstancedStaticMeshComponent;
+class UPrimitiveComponent;
 class ULevel;
 class IConsoleObject;
 struct FClusterNode;
@@ -31,7 +32,6 @@ struct FNoGrassFoliageInstanceKey
 		return HashCombineFast(GetTypeHash(Key.Component), GetTypeHash(Key.InstanceIndex));
 	}
 };
-
 struct FNoGrassLightweightKey
 {
 	UClass* BuildableClass = nullptr;
@@ -52,6 +52,12 @@ struct FNoGrassLightweightExclusion
 {
 	FBox Bounds{ForceInit};
 	FTransform Transform = FTransform::Identity;
+};
+
+struct FNoGrassCollisionFootprint
+{
+	FBox Bounds{ForceInit};
+	FTransform ComponentTransform = FTransform::Identity;
 };
 
 DECLARE_LOG_CATEGORY_EXTERN(LogNoGrassUnderBuildings, Log, All);
@@ -124,6 +130,10 @@ private:
 	void ProcessPendingStreamedFoliage(UWorld* World);
 	void RestoreAllDecorativeFoliage();
 	bool IsDecorativeGroundFoliage(const UHierarchicalInstancedStaticMeshComponent* Component) const;
+	FBox GetLandscapeExclusionBounds(AFGBuildable* Buildable) const;
+	bool IsCollisionFootprintCovered(
+		const TWeakObjectPtr<AFGBuildable>& Buildable,
+		const FVector& Location) const;
 	void AddLandscapeExclusion(AFGBuildable* Buildable, bool bRefresh = true);
 	void RemoveLandscapeExclusion(
 		const TWeakObjectPtr<AFGBuildable>& Buildable,
@@ -140,6 +150,7 @@ private:
 	TSet<TWeakObjectPtr<AFGBuildable>> KnownBuildables;
 	TSet<TWeakObjectPtr<AFGBuildable>> ExcludedBuildables;
 	TMap<TWeakObjectPtr<AFGBuildable>, FBox> ExclusionBounds;
+	TMap<TWeakObjectPtr<AFGBuildable>, FNoGrassCollisionFootprint> CollisionFootprints;
 	TMap<FIntVector, TSet<TWeakObjectPtr<AFGBuildable>>> BuildableCoverageGrid;
 	TMap<TWeakObjectPtr<AActor>, FBox> PowerPoleExclusionBounds;
 	TMap<FIntVector, TSet<TWeakObjectPtr<AActor>>> PowerPoleCoverageGrid;
@@ -163,4 +174,5 @@ private:
 	uint64 CoverageRevision = 0;
 	uint64 AppliedFoliageRevision = MAX_uint64;
 	static constexpr double CoverageGridCellSize = 2000.0;
+	static constexpr double CollisionFootprintCellSize = 25.0;
 };

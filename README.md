@@ -12,6 +12,7 @@ Stops grass and small decorative ground vegetation from poking through foundatio
 - Reapplies suppression when foliage streams back in after travelling away.
 - Batches related placement and dismantle events into a single targeted refresh.
 - Avoids refreshing areas that remain covered by another tracked building.
+- Uses a precise, precomputed physical footprint for the Space Elevator instead of its enormous orbital bounds.
 
 The mod does not automatically remove trees, bushes, berries, resource plants, or other valuable foliage. Those should still be removed using normal game tools.
 
