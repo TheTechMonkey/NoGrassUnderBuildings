@@ -19,13 +19,7 @@ No configuration is required or provided.
 
 ## Compatibility
 
-- Satisfactory 1.2.4 (CL 502094)
+- Satisfactory 1.2.4 
 - SML 3.12
-- Steam and Epic Windows clients
-- Windows dedicated servers
-- Linux dedicated servers
 
-## To-Do
 
-- Improve how the footprint of each placed building or item is calculated.
-- Maintain a consistent approximately 1-meter exclusion buffer around placed items so edge grass cannot protrude through them.
