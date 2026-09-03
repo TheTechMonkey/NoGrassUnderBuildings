@@ -88,6 +88,10 @@ private:
 	void ProcessPendingCoverageRefresh(UWorld* World);
 	bool IsHorizontalAreaFullyCovered(const FBox& Bounds) const;
 	FIntVector GetCoverageGridCell(const FVector& Location) const;
+	bool TryGetCoverageGridRange(
+		const FBox& Bounds,
+		FIntVector& OutMinCell,
+		FIntVector& OutMaxCell) const;
 	void AddBuildableToCoverageGrid(const TWeakObjectPtr<AFGBuildable>& Buildable, const FBox& Bounds);
 	void RemoveBuildableFromCoverageGrid(const TWeakObjectPtr<AFGBuildable>& Buildable, const FBox& Bounds);
 	void AddLightweightToCoverageGrid(const FNoGrassLightweightKey& Key, const FBox& Bounds);
@@ -174,5 +178,6 @@ private:
 	uint64 CoverageRevision = 0;
 	uint64 AppliedFoliageRevision = MAX_uint64;
 	static constexpr double CoverageGridCellSize = 2000.0;
+	static constexpr int64 CoverageGridMaxCellsPerBounds = 65536;
 	static constexpr double CollisionFootprintCellSize = 25.0;
 };

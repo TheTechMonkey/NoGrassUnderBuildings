@@ -27,6 +27,36 @@
 
 DEFINE_LOG_CATEGORY(LogNoGrassUnderBuildings);
 
+namespace
+{
+	constexpr double GNoGrassMaxComponentSpan = 100000.0;
+	constexpr double GNoGrassMaxComponentDistance = 200000.0;
+
+	bool IsFiniteBox(const FBox& Bounds)
+	{
+		return Bounds.IsValid &&
+			FMath::IsFinite(Bounds.Min.X) && FMath::IsFinite(Bounds.Min.Y) && FMath::IsFinite(Bounds.Min.Z) &&
+			FMath::IsFinite(Bounds.Max.X) && FMath::IsFinite(Bounds.Max.Y) && FMath::IsFinite(Bounds.Max.Z);
+	}
+
+	bool IsUsableComponentBounds(const FBox& Bounds, const FVector& ActorLocation)
+	{
+		if (!IsFiniteBox(Bounds))
+		{
+			return false;
+		}
+
+		const FVector Size = Bounds.GetSize();
+		const FVector CenterOffset = Bounds.GetCenter() - ActorLocation;
+		return Size.X <= GNoGrassMaxComponentSpan &&
+			Size.Y <= GNoGrassMaxComponentSpan &&
+			Size.Z <= GNoGrassMaxComponentSpan &&
+			FMath::Abs(CenterOffset.X) <= GNoGrassMaxComponentDistance &&
+			FMath::Abs(CenterOffset.Y) <= GNoGrassMaxComponentDistance &&
+			FMath::Abs(CenterOffset.Z) <= GNoGrassMaxComponentDistance;
+	}
+}
+
 void FNoGrassUnderBuildingsModule::StartupModule()
 {
 	ScanNearbyCommand = IConsoleManager::Get().RegisterConsoleCommand(
@@ -1335,6 +1365,41 @@ FIntVector FNoGrassUnderBuildingsModule::GetCoverageGridCell(const FVector& Loca
 		FMath::FloorToInt(Location.Z / CoverageGridCellSize));
 }
 
+bool FNoGrassUnderBuildingsModule::TryGetCoverageGridRange(
+	const FBox& Bounds,
+	FIntVector& OutMinCell,
+	FIntVector& OutMaxCell) const
+{
+	if (!IsFiniteBox(Bounds))
+	{
+		return false;
+	}
+
+	const FVector MinGrid = Bounds.Min / CoverageGridCellSize;
+	const FVector MaxGrid = Bounds.Max / CoverageGridCellSize;
+	constexpr double MinSafeCell = static_cast<double>(MIN_int32) + 1.0;
+	constexpr double MaxSafeCell = static_cast<double>(MAX_int32) - 1.0;
+	if (MinGrid.X < MinSafeCell || MinGrid.Y < MinSafeCell || MinGrid.Z < MinSafeCell ||
+		MaxGrid.X > MaxSafeCell || MaxGrid.Y > MaxSafeCell || MaxGrid.Z > MaxSafeCell)
+	{
+		return false;
+	}
+
+	OutMinCell = GetCoverageGridCell(Bounds.Min);
+	OutMaxCell = GetCoverageGridCell(Bounds.Max);
+	const int64 CellCountX = static_cast<int64>(OutMaxCell.X) - OutMinCell.X + 1;
+	const int64 CellCountY = static_cast<int64>(OutMaxCell.Y) - OutMinCell.Y + 1;
+	const int64 CellCountZ = static_cast<int64>(OutMaxCell.Z) - OutMinCell.Z + 1;
+	if (CellCountX <= 0 || CellCountY <= 0 || CellCountZ <= 0 ||
+		CellCountX > CoverageGridMaxCellsPerBounds ||
+		CellCountY > CoverageGridMaxCellsPerBounds / CellCountX ||
+		CellCountZ > CoverageGridMaxCellsPerBounds / (CellCountX * CellCountY))
+	{
+		return false;
+	}
+	return true;
+}
+
 void FNoGrassUnderBuildingsModule::AddBuildableToCoverageGrid(
 	const TWeakObjectPtr<AFGBuildable>& Buildable,
 	const FBox& Bounds)
@@ -1343,8 +1408,15 @@ void FNoGrassUnderBuildingsModule::AddBuildableToCoverageGrid(
 	{
 		return;
 	}
-	const FIntVector MinCell = GetCoverageGridCell(Bounds.Min);
-	const FIntVector MaxCell = GetCoverageGridCell(Bounds.Max);
+	FIntVector MinCell;
+	FIntVector MaxCell;
+	if (!TryGetCoverageGridRange(Bounds, MinCell, MaxCell))
+	{
+		UE_LOG(LogNoGrassUnderBuildings, Warning,
+			TEXT("Skipped unsafe buildable coverage-grid bounds: min=%s max=%s class=%s"),
+			*Bounds.Min.ToString(), *Bounds.Max.ToString(), *GetNameSafe(Buildable.IsValid() ? Buildable->GetClass() : nullptr));
+		return;
+	}
 	for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
 	{
 		for (int32 Y = MinCell.Y; Y <= MaxCell.Y; ++Y)
@@ -1365,8 +1437,12 @@ void FNoGrassUnderBuildingsModule::RemoveBuildableFromCoverageGrid(
 	{
 		return;
 	}
-	const FIntVector MinCell = GetCoverageGridCell(Bounds.Min);
-	const FIntVector MaxCell = GetCoverageGridCell(Bounds.Max);
+	FIntVector MinCell;
+	FIntVector MaxCell;
+	if (!TryGetCoverageGridRange(Bounds, MinCell, MaxCell))
+	{
+		return;
+	}
 	for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
 	{
 		for (int32 Y = MinCell.Y; Y <= MaxCell.Y; ++Y)
@@ -1395,8 +1471,15 @@ void FNoGrassUnderBuildingsModule::AddPowerPoleToCoverageGrid(
 	{
 		return;
 	}
-	const FIntVector MinCell = GetCoverageGridCell(Bounds.Min);
-	const FIntVector MaxCell = GetCoverageGridCell(Bounds.Max);
+	FIntVector MinCell;
+	FIntVector MaxCell;
+	if (!TryGetCoverageGridRange(Bounds, MinCell, MaxCell))
+	{
+		UE_LOG(LogNoGrassUnderBuildings, Warning,
+			TEXT("Skipped unsafe power-pole coverage-grid bounds: min=%s max=%s"),
+			*Bounds.Min.ToString(), *Bounds.Max.ToString());
+		return;
+	}
 	for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
 	{
 		for (int32 Y = MinCell.Y; Y <= MaxCell.Y; ++Y)
@@ -1417,8 +1500,12 @@ void FNoGrassUnderBuildingsModule::RemovePowerPoleFromCoverageGrid(
 	{
 		return;
 	}
-	const FIntVector MinCell = GetCoverageGridCell(Bounds.Min);
-	const FIntVector MaxCell = GetCoverageGridCell(Bounds.Max);
+	FIntVector MinCell;
+	FIntVector MaxCell;
+	if (!TryGetCoverageGridRange(Bounds, MinCell, MaxCell))
+	{
+		return;
+	}
 	for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
 	{
 		for (int32 Y = MinCell.Y; Y <= MaxCell.Y; ++Y)
@@ -1447,8 +1534,15 @@ void FNoGrassUnderBuildingsModule::AddLightweightToCoverageGrid(
 	{
 		return;
 	}
-	const FIntVector MinCell = GetCoverageGridCell(Bounds.Min);
-	const FIntVector MaxCell = GetCoverageGridCell(Bounds.Max);
+	FIntVector MinCell;
+	FIntVector MaxCell;
+	if (!TryGetCoverageGridRange(Bounds, MinCell, MaxCell))
+	{
+		UE_LOG(LogNoGrassUnderBuildings, Warning,
+			TEXT("Skipped unsafe lightweight coverage-grid bounds: min=%s max=%s class=%s"),
+			*Bounds.Min.ToString(), *Bounds.Max.ToString(), *GetNameSafe(Key.BuildableClass));
+		return;
+	}
 	for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
 	{
 		for (int32 Y = MinCell.Y; Y <= MaxCell.Y; ++Y)
@@ -1469,8 +1563,12 @@ void FNoGrassUnderBuildingsModule::RemoveLightweightFromCoverageGrid(
 	{
 		return;
 	}
-	const FIntVector MinCell = GetCoverageGridCell(Bounds.Min);
-	const FIntVector MaxCell = GetCoverageGridCell(Bounds.Max);
+	FIntVector MinCell;
+	FIntVector MaxCell;
+	if (!TryGetCoverageGridRange(Bounds, MinCell, MaxCell))
+	{
+		return;
+	}
 	for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
 	{
 		for (int32 Y = MinCell.Y; Y <= MaxCell.Y; ++Y)
@@ -1499,8 +1597,12 @@ void FNoGrassUnderBuildingsModule::GatherCoverageBounds(
 	{
 		return;
 	}
-	const FIntVector MinCell = GetCoverageGridCell(QueryBounds.Min);
-	const FIntVector MaxCell = GetCoverageGridCell(QueryBounds.Max);
+	FIntVector MinCell;
+	FIntVector MaxCell;
+	if (!TryGetCoverageGridRange(QueryBounds, MinCell, MaxCell))
+	{
+		return;
+	}
 	TSet<TWeakObjectPtr<AFGBuildable>> SeenBuildables;
 	TSet<FNoGrassLightweightKey> SeenLightweights;
 	TSet<TWeakObjectPtr<AActor>> SeenPowerPoles;
@@ -1854,8 +1956,47 @@ FBox FNoGrassUnderBuildingsModule::GetLandscapeExclusionBounds(AFGBuildable* Bui
 			break;
 		}
 	}
+	else if (!IsUsableComponentBounds(RawBounds, Buildable->GetActorLocation()))
+	{
+		FBox SanitizedBounds(ForceInit);
+		int32 AcceptedComponents = 0;
+		int32 RejectedComponents = 0;
+		TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(Buildable);
+		for (UPrimitiveComponent* Component : PrimitiveComponents)
+		{
+			if (!IsValid(Component))
+			{
+				continue;
+			}
 
-	if (!RawBounds.IsValid)
+			const FBox ComponentBounds = Component->Bounds.GetBox();
+			if (IsUsableComponentBounds(ComponentBounds, Buildable->GetActorLocation()))
+			{
+				SanitizedBounds += ComponentBounds;
+				++AcceptedComponents;
+			}
+			else
+			{
+				++RejectedComponents;
+			}
+		}
+
+		if (!IsFiniteBox(SanitizedBounds))
+		{
+			UE_LOG(LogNoGrassUnderBuildings, Verbose,
+				TEXT("Ignored buildable with unusable runtime bounds: class=%s min=%s max=%s rejected-components=%d"),
+				*GetNameSafe(Buildable->GetClass()), *RawBounds.Min.ToString(), *RawBounds.Max.ToString(), RejectedComponents);
+			return FBox(ForceInit);
+		}
+
+		UE_LOG(LogNoGrassUnderBuildings, Verbose,
+			TEXT("Sanitized abnormal runtime bounds: class=%s raw-min=%s raw-max=%s accepted-components=%d rejected-components=%d"),
+			*GetNameSafe(Buildable->GetClass()), *RawBounds.Min.ToString(), *RawBounds.Max.ToString(),
+			AcceptedComponents, RejectedComponents);
+		RawBounds = SanitizedBounds;
+	}
+
+	if (!IsFiniteBox(RawBounds))
 	{
 		return FBox(ForceInit);
 	}

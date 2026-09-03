@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.7
+
+- Fixed a compatibility issue that could freeze the game and rapidly consume memory when placing certain modded buildings, including the standard and stackable Magic Machines.
+- Added validation that ignores nonphysical component bounds while preserving the building's valid physical footprint.
+- Added a hard safety limit to prevent malformed or unusually large bounds from creating an unbounded spatial-index workload.
+- Verified placement, save loading, dismantling, and repeated reloads with every Magic Machines building.
+
 ## 1.3.6
 
 - Fixed the Space Elevator clearing vegetation across an enormous area because of its orbital actor bounds.
