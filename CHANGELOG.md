@@ -3,7 +3,6 @@
 ## 1.3.8
 
 - Added support for three previously missed decorative plants: `SM_Plant_02`, `SM_Plant_04`, and `SM_Cliff_Ivy_02`.
-- These plants now hide beneath buildings and return when the buildings are dismantled, using the existing event-driven system without adding background scans.
 
 ## 1.3.7
 
