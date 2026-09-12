@@ -621,7 +621,10 @@ bool FNoGrassUnderBuildingsModule::IsDecorativeGroundFoliage(
 		MeshPath.Contains(TEXT("GroundCover"), ESearchCase::IgnoreCase) ||
 		MeshPath.Contains(TEXT("Ground_Cover"), ESearchCase::IgnoreCase) ||
 		MeshPath.Contains(TEXT("/SmallFoliage/LowerVegatation/SM_CoverGround_01."), ESearchCase::IgnoreCase) ||
+		MeshPath.Contains(TEXT("/SmallFoliage/LowerVegatation/SM_Plant_02."), ESearchCase::IgnoreCase) ||
+		MeshPath.Contains(TEXT("/SmallFoliage/LowerVegatation/SM_Plant_04."), ESearchCase::IgnoreCase) ||
 		MeshPath.Contains(TEXT("/SmallFoliage/LowerVegatation/SM_Plant_07."), ESearchCase::IgnoreCase) ||
+		MeshPath.Contains(TEXT("/SmallFoliage/Ivy/SM_Cliff_Ivy_02."), ESearchCase::IgnoreCase) ||
 		MeshPath.Contains(TEXT("/SmallFoliage/PlantModular/SM_PlantModular_D."), ESearchCase::IgnoreCase);
 }
 
