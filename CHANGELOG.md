@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.9
+
+- Added optional foliage clearing along saved vehicle paths, enabled by default.
+- Sized each cleared route to its assigned vehicle, with conservative minimum and maximum widths.
+- Restored route foliage when paths are removed or the setting is disabled.
+- Kept substantial gameplay foliage such as bushes, roots, logs, resource plants, and trees under normal player control.
+- Removed internal foliage scan and cliff-trace diagnostics from release builds.
+
 ## 1.3.8
 
 - Added support for three previously missed decorative plants: `SM_Plant_02`, `SM_Plant_04`, and `SM_Cliff_Ivy_02`.

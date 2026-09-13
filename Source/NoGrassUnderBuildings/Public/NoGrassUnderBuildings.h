@@ -8,12 +8,12 @@ class AFGBuildable;
 class AFGBuildableSubsystem;
 class AFGCliffActor;
 class AFGLightweightBuildableSubsystem;
+class AFGVehiclePathSegment;
+class AFGVehicleSubsystem;
 class UFGFoliageInstancedSMC;
 class UGrassInstancedStaticMeshComponent;
 class UHierarchicalInstancedStaticMeshComponent;
-class UPrimitiveComponent;
 class ULevel;
-class IConsoleObject;
 struct FClusterNode;
 class FStaticMeshInstanceData;
 
@@ -60,6 +60,14 @@ struct FNoGrassCollisionFootprint
 	FTransform ComponentTransform = FTransform::Identity;
 };
 
+struct FNoGrassVehiclePathExclusion
+{
+	TArray<FVector> SamplePoints;
+	TArray<FBox> SegmentBounds;
+	float HalfWidth = 0.0f;
+	float VerticalTolerance = 0.0f;
+};
+
 DECLARE_LOG_CATEGORY_EXTERN(LogNoGrassUnderBuildings, Log, All);
 
 class FNoGrassUnderBuildingsModule final : public IModuleInterface
@@ -76,6 +84,8 @@ private:
 	void HandleActorDestroyed(AActor* Actor);
 	void HandleBuildableAdded(AFGBuildableSubsystem* Subsystem, AFGBuildable* Buildable);
 	void HandleBuildableRemoved(AFGBuildableSubsystem* Subsystem, AFGBuildable* Buildable);
+	void HandleVehiclePathAdded(AFGVehicleSubsystem* Subsystem, AFGVehiclePathSegment* PathSegment);
+	void HandleVehiclePathRemoved(AFGVehicleSubsystem* Subsystem, AFGVehiclePathSegment* PathSegment);
 	void HandleLightweightAdded(
 		AFGLightweightBuildableSubsystem* Subsystem,
 		UClass* BuildableClass,
@@ -94,10 +104,17 @@ private:
 		FIntVector& OutMaxCell) const;
 	void AddBuildableToCoverageGrid(const TWeakObjectPtr<AFGBuildable>& Buildable, const FBox& Bounds);
 	void RemoveBuildableFromCoverageGrid(const TWeakObjectPtr<AFGBuildable>& Buildable, const FBox& Bounds);
+	void AddVehiclePathToCoverageGrid(const TWeakObjectPtr<AFGBuildable>& PathSegment, const TArray<FBox>& SegmentBounds);
+	void RemoveVehiclePathFromCoverageGrid(const TWeakObjectPtr<AFGBuildable>& PathSegment, const TArray<FBox>& SegmentBounds);
 	void AddLightweightToCoverageGrid(const FNoGrassLightweightKey& Key, const FBox& Bounds);
 	void RemoveLightweightFromCoverageGrid(const FNoGrassLightweightKey& Key, const FBox& Bounds);
 	void GatherCoverageBounds(const FBox& QueryBounds, TArray<FBox>& OutBounds) const;
 	bool IsLocationCovered(const FVector& Location) const;
+	bool BuildVehiclePathExclusion(AFGVehiclePathSegment* PathSegment, FNoGrassVehiclePathExclusion& OutExclusion) const;
+	bool IsVehiclePathCovered(const FNoGrassVehiclePathExclusion& Exclusion, const FVector& Location) const;
+	void AddVehiclePathExclusion(AFGVehiclePathSegment* PathSegment, bool bRefresh = true);
+	void RemoveVehiclePathExclusion(const TWeakObjectPtr<AFGBuildable>& PathSegment, bool bRefresh = true);
+	void ApplyVehiclePathSetting(UWorld* World, bool bEnabled);
 	void ScanBuildables(UWorld* World);
 	void ScanBoundslessPowerPoles(UWorld* World);
 	bool IsBoundslessPowerPole(const AActor* Actor) const;
@@ -117,14 +134,6 @@ private:
 		const FNoGrassLightweightKey& Key,
 		TArray<FBox>& RefreshBounds);
 	void ClearLightweightExclusions(UWorld* World, bool bRefresh);
-	void ScanNearbyFoliage(const TArray<FString>& Args);
-	void ArmCliffTrace(const TArray<FString>& Args);
-	void TraceCliffGrassUpload(
-		UGrassInstancedStaticMeshComponent* Component,
-		const TArray<FClusterNode>& ClusterTree,
-		int32 OcclusionLayerNum,
-		int32 NumBuiltRenderInstances,
-		const FStaticMeshInstanceData* InstanceData);
 	int32 FilterGrassUpload(
 		UGrassInstancedStaticMeshComponent* Component,
 		FStaticMeshInstanceData* InstanceData);
@@ -156,9 +165,13 @@ private:
 	TMap<TWeakObjectPtr<AFGBuildable>, FBox> ExclusionBounds;
 	TMap<TWeakObjectPtr<AFGBuildable>, FNoGrassCollisionFootprint> CollisionFootprints;
 	TMap<FIntVector, TSet<TWeakObjectPtr<AFGBuildable>>> BuildableCoverageGrid;
+	TMap<TWeakObjectPtr<AFGBuildable>, FNoGrassVehiclePathExclusion> VehiclePathExclusions;
+	TMap<FIntVector, TSet<TWeakObjectPtr<AFGBuildable>>> VehiclePathCoverageGrid;
 	TMap<TWeakObjectPtr<AActor>, FBox> PowerPoleExclusionBounds;
 	TMap<FIntVector, TSet<TWeakObjectPtr<AActor>>> PowerPoleCoverageGrid;
 	double NextBuildableScanAt = 0.0;
+	double NextVehiclePathSettingCheckAt = 0.0;
+	bool bVehiclePathsEnabled = true;
 	bool bInitialBuildableScanComplete = false;
 	int32 LastLightweightClassCount = INDEX_NONE;
 	int32 LastLightweightInstanceCount = INDEX_NONE;
@@ -167,12 +180,6 @@ private:
 	TArray<FBox> PendingRefreshBounds;
 	int32 PendingCoverageEventCount = 0;
 	double PendingCoverageQueuedAt = 0.0;
-	IConsoleObject* ScanNearbyCommand = nullptr;
-	IConsoleObject* ArmCliffTraceCommand = nullptr;
-	bool bCliffTraceArmed = false;
-	bool bAutoCliffTracePending = false;
-	FVector CliffTraceCenter = FVector::ZeroVector;
-	float CliffTraceRadiusSquared = 0.0f;
 	TMap<FNoGrassFoliageInstanceKey, FTransform> SuppressedFoliage;
 	TSet<TWeakObjectPtr<ULevel>> PendingStreamedLevels;
 	uint64 CoverageRevision = 0;

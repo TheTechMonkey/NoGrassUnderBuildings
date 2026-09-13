@@ -1,10 +1,10 @@
 {
 	"FileVersion": 3,
 	"Version": 1,
-	"VersionName": "1.3.8",
-	"SemVersion": "1.3.8",
+	"VersionName": "1.3.9",
+	"SemVersion": "1.3.9",
 	"FriendlyName": "No Grass Under Buildings",
-	"Description": "Hides grass and small decorative foliage beneath buildings and restores it when they are dismantled.",
+	"Description": "Hides grass and small decorative foliage beneath buildings and along saved vehicle paths, then restores it when coverage is removed.",
 	"Category": "Quality of Life",
 	"CreatedBy": "TechMonkey",
 	"CanContainContent": false,

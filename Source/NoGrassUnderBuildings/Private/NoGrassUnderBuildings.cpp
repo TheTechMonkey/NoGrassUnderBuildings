@@ -1,4 +1,5 @@
 #include "NoGrassUnderBuildings.h"
+#include "NoGrassUnderBuildingsConfiguration.h"
 
 #include "Buildables/FGBuildable.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
@@ -10,17 +11,14 @@
 #include "FGLightweightBuildableSubsystem.h"
 #include "FGCliffActor.h"
 #include "FGFoliageInstancedSMC.h"
-#include "GameFramework/PlayerController.h"
 #include "GrassInstancedStaticMeshComponent.h"
-#include "HAL/IConsoleManager.h"
-#include "HAL/PlatformFileManager.h"
-#include "Misc/FileHelper.h"
-#include "Misc/Paths.h"
 #include "Patching/NativeHookManager.h"
 #include "RenderTransform.h"
 #include "StaticMeshResources.h"
 #include "TimerManager.h"
 #include "UObject/UObjectIterator.h"
+#include "WheeledVehicles/FGVehiclePathSegment.h"
+#include "WheeledVehicles/FGVehicleSubsystem.h"
 #include "LandscapeComponent.h"
 #include "LandscapeProxy.h"
 #include "SpaceElevatorFootprint.inl"
@@ -59,20 +57,6 @@ namespace
 
 void FNoGrassUnderBuildingsModule::StartupModule()
 {
-	ScanNearbyCommand = IConsoleManager::Get().RegisterConsoleCommand(
-		TEXT("NoGrassUnderBuildings.ScanNearby"),
-		TEXT("Writes nearby instanced-foliage mesh diagnostics. Optional radius in meters."),
-		FConsoleCommandWithArgsDelegate::CreateRaw(
-			this,
-			&FNoGrassUnderBuildingsModule::ScanNearbyFoliage),
-		ECVF_Default);
-	ArmCliffTraceCommand = IConsoleManager::Get().RegisterConsoleCommand(
-		TEXT("NoGrassUnderBuildings.TraceNextCliff"),
-		TEXT("Captures the next nearby cliff-grass render upload once, then disarms. Optional radius in meters."),
-		FConsoleCommandWithArgsDelegate::CreateRaw(
-			this,
-			&FNoGrassUnderBuildingsModule::ArmCliffTrace),
-		ECVF_Default);
 #if !WITH_EDITOR
 	SUBSCRIBE_METHOD_AFTER(
 		AFGBuildableSubsystem::AddBuildable,
@@ -85,6 +69,18 @@ void FNoGrassUnderBuildingsModule::StartupModule()
 		[this](AFGBuildableSubsystem* Subsystem, AFGBuildable* Buildable)
 		{
 			HandleBuildableRemoved(Subsystem, Buildable);
+		});
+	SUBSCRIBE_METHOD_AFTER(
+		AFGVehicleSubsystem::AddPathSegment,
+		[this](AFGVehicleSubsystem* Subsystem, AFGVehiclePathSegment* PathSegment)
+		{
+			HandleVehiclePathAdded(Subsystem, PathSegment);
+		});
+	SUBSCRIBE_METHOD_AFTER(
+		AFGVehicleSubsystem::RemovePathSegment,
+		[this](AFGVehicleSubsystem* Subsystem, AFGVehiclePathSegment* PathSegment)
+		{
+			HandleVehiclePathRemoved(Subsystem, PathSegment);
 		});
 	SUBSCRIBE_METHOD_AFTER(
 		AFGLightweightBuildableSubsystem::AddFromBuildableInstanceData,
@@ -120,12 +116,6 @@ void FNoGrassUnderBuildingsModule::StartupModule()
 			int32 NumBuiltRenderInstances,
 			FStaticMeshInstanceData* InstanceData)
 		{
-			TraceCliffGrassUpload(
-				Component,
-				ClusterTree,
-				OcclusionLayerNum,
-				NumBuiltRenderInstances,
-				InstanceData);
 			FilterGrassUpload(Component, InstanceData);
 			Scope(
 				Component,
@@ -156,17 +146,6 @@ void FNoGrassUnderBuildingsModule::StartupModule()
 
 void FNoGrassUnderBuildingsModule::ShutdownModule()
 {
-	if (ScanNearbyCommand)
-	{
-		IConsoleManager::Get().UnregisterConsoleObject(ScanNearbyCommand);
-		ScanNearbyCommand = nullptr;
-	}
-	if (ArmCliffTraceCommand)
-	{
-		IConsoleManager::Get().UnregisterConsoleObject(ArmCliffTraceCommand);
-		ArmCliffTraceCommand = nullptr;
-	}
-	bCliffTraceArmed = false;
 	FWorldDelegates::OnPostWorldInitialization.Remove(PostWorldInitializationHandle);
 	FWorldDelegates::OnWorldCleanup.Remove(WorldCleanupHandle);
 	FWorldDelegates::OnWorldPostActorTick.Remove(WorldPostActorTickHandle);
@@ -199,6 +178,8 @@ void FNoGrassUnderBuildingsModule::ShutdownModule()
 	ExclusionBounds.Empty();
 	CollisionFootprints.Empty();
 	BuildableCoverageGrid.Empty();
+	VehiclePathExclusions.Empty();
+	VehiclePathCoverageGrid.Empty();
 	PowerPoleExclusionBounds.Empty();
 	PowerPoleCoverageGrid.Empty();
 	LastLightweightClassCount = INDEX_NONE;
@@ -228,7 +209,8 @@ int32 FNoGrassUnderBuildingsModule::FilterGrassUpload(
 		return 0;
 	}
 
-	if (BuildableCoverageGrid.IsEmpty() && LightweightCoverageGrid.IsEmpty() && PowerPoleCoverageGrid.IsEmpty())
+	if (BuildableCoverageGrid.IsEmpty() && VehiclePathCoverageGrid.IsEmpty() &&
+		LightweightCoverageGrid.IsEmpty() && PowerPoleCoverageGrid.IsEmpty())
 	{
 		return 0;
 	}
@@ -271,316 +253,6 @@ int32 FNoGrassUnderBuildingsModule::FilterGrassUpload(
 	return HiddenCount;
 }
 
-void FNoGrassUnderBuildingsModule::ArmCliffTrace(const TArray<FString>& Args)
-{
-	UWorld* World = ActiveGameWorld.Get();
-	if (!World)
-	{
-		return;
-	}
-
-	float RadiusMeters = 30.0f;
-	if (!Args.IsEmpty())
-	{
-		RadiusMeters = FMath::Clamp(FCString::Atof(*Args[0]), 5.0f, 100.0f);
-	}
-	FRotator ViewRotation = FRotator::ZeroRotator;
-	if (APlayerController* Controller = World->GetFirstPlayerController())
-	{
-		Controller->GetPlayerViewPoint(CliffTraceCenter, ViewRotation);
-	}
-	CliffTraceRadiusSquared = FMath::Square(RadiusMeters * 100.0f);
-	bCliffTraceArmed = true;
-
-	const FString OutputPath = FPaths::Combine(
-		FPaths::ProjectLogDir(),
-		TEXT("NoGrassUnderBuildings-CliffTrace.txt"));
-	TArray<FString> Lines;
-	Lines.Add(FString::Printf(
-		TEXT("Cliff trace armed; center=%s; radius=%.1fm; waiting for one generated-grass upload"),
-		*CliffTraceCenter.ToCompactString(),
-		RadiusMeters));
-	FFileHelper::SaveStringArrayToFile(Lines, *OutputPath);
-	UE_LOG(LogNoGrassUnderBuildings, Display, TEXT("Cliff trace armed once: %s"), *OutputPath);
-}
-
-void FNoGrassUnderBuildingsModule::TraceCliffGrassUpload(
-	UGrassInstancedStaticMeshComponent* Component,
-	const TArray<FClusterNode>& ClusterTree,
-	int32 OcclusionLayerNum,
-	int32 NumBuiltRenderInstances,
-	const FStaticMeshInstanceData* InstanceData)
-{
-	if ((!bCliffTraceArmed && !bAutoCliffTracePending) || !IsValid(Component) || !InstanceData)
-	{
-		return;
-	}
-	AFGCliffActor* Cliff = Component->GetTypedOuter<AFGCliffActor>();
-	UWorld* ComponentWorld = Component->GetWorld();
-	if (!IsValid(Cliff) || !IsValid(ComponentWorld) || !ComponentWorld->IsGameWorld())
-	{
-		return;
-	}
-	const bool bManualTrace = bCliffTraceArmed;
-	const FBox CliffBounds = Cliff->GetComponentsBoundingBox(true);
-	if (bManualTrace && CliffBounds.ComputeSquaredDistanceToPoint(CliffTraceCenter) > CliffTraceRadiusSquared)
-	{
-		return;
-	}
-
-	// One matching upload is enough. Disarm before doing file work so a nested or
-	// concurrent upload cannot produce a flood of diagnostic output.
-	bCliffTraceArmed = false;
-	bAutoCliffTracePending = false;
-	const UStaticMesh* Mesh = Component->GetStaticMesh();
-	TArray<FString> Lines;
-	Lines.Add(TEXT("No Grass Under Buildings - one-shot cliff generation trace"));
-	Lines.Add(FString::Printf(TEXT("capture-mode=%s"), bManualTrace ? TEXT("manual-nearby") : TEXT("automatic-first-world-upload")));
-	Lines.Add(FString::Printf(TEXT("game-thread=%s"), IsInGameThread() ? TEXT("true") : TEXT("false")));
-	Lines.Add(FString::Printf(TEXT("cliff=%s"), *Cliff->GetPathName()));
-	Lines.Add(FString::Printf(TEXT("component=%s"), *Component->GetPathName()));
-	Lines.Add(FString::Printf(TEXT("mesh=%s"), Mesh ? *Mesh->GetPathName() : TEXT("<none>")));
-	Lines.Add(FString::Printf(TEXT("cliff-significant=%s"), Cliff->IsSignificant() ? TEXT("true") : TEXT("false")));
-	Lines.Add(FString::Printf(TEXT("component-registered=%s"), Component->IsRegistered() ? TEXT("true") : TEXT("false")));
-	Lines.Add(FString::Printf(TEXT("cpu-component-instances-before-upload=%d"), Component->GetInstanceCount()));
-	Lines.Add(FString::Printf(TEXT("incoming-buffer-instances=%d"), InstanceData->GetNumInstances()));
-	Lines.Add(FString::Printf(TEXT("declared-render-instances=%d"), NumBuiltRenderInstances));
-	Lines.Add(FString::Printf(TEXT("cluster-nodes=%d"), ClusterTree.Num()));
-	Lines.Add(FString::Printf(TEXT("occlusion-layer-nodes=%d"), OcclusionLayerNum));
-	Lines.Add(FString::Printf(TEXT("cliff-bounds=%s"), *CliffBounds.ToString()));
-	Lines.Add(TEXT("result=upload observed without modifying the buffer"));
-
-	const FString OutputPath = FPaths::Combine(
-		FPaths::ProjectLogDir(),
-		TEXT("NoGrassUnderBuildings-CliffTrace.txt"));
-	FFileHelper::SaveStringArrayToFile(Lines, *OutputPath);
-	UE_LOG(LogNoGrassUnderBuildings, Display, TEXT("Captured one cliff-grass upload and disarmed: %s"), *OutputPath);
-}
-
-void FNoGrassUnderBuildingsModule::ScanNearbyFoliage(const TArray<FString>& Args)
-{
-	UWorld* World = ActiveGameWorld.Get();
-	if (!World)
-	{
-		return;
-	}
-
-	float RadiusMeters = 10.0f;
-	if (!Args.IsEmpty())
-	{
-		RadiusMeters = FMath::Clamp(FCString::Atof(*Args[0]), 1.0f, 50.0f);
-	}
-	const float RadiusCm = RadiusMeters * 100.0f;
-	const float RadiusSquared = FMath::Square(RadiusCm);
-
-	FVector Center = FVector::ZeroVector;
-	FRotator ViewRotation = FRotator::ZeroRotator;
-	if (APlayerController* Controller = World->GetFirstPlayerController())
-	{
-		Controller->GetPlayerViewPoint(Center, ViewRotation);
-	}
-
-	TArray<FString> Lines;
-	Lines.Add(FString::Printf(
-		TEXT("No Grass Under Buildings foliage scan; center=%s; radius=%.1fm"),
-		*Center.ToCompactString(),
-		RadiusMeters));
-	int32 BuildablesMatched = 0;
-	for (TActorIterator<AFGBuildable> It(World); It; ++It)
-	{
-		AFGBuildable* Buildable = *It;
-		if (!IsValid(Buildable))
-		{
-			continue;
-		}
-
-		const FBox RawBounds = Buildable->GetComponentsBoundingBox(true);
-		if (!RawBounds.IsValid || RawBounds.ComputeSquaredDistanceToPoint(Center) > RadiusSquared)
-		{
-			continue;
-		}
-
-		++BuildablesMatched;
-		const FBox EffectiveBounds = GetLandscapeExclusionBounds(Buildable);
-		const bool bPhysicalFootprint =
-			Buildable->GetClass()->GetName() == TEXT("Build_SpaceElevator_C");
-		Lines.Add(FString::Printf(
-			TEXT("buildable class=%s location=%s raw-bounds=%s candidate-bounds=%s footprint=%s"),
-			*GetNameSafe(Buildable->GetClass()),
-			*Buildable->GetActorLocation().ToCompactString(),
-			*RawBounds.ToString(),
-			*EffectiveBounds.ToString(),
-			bPhysicalFootprint ? TEXT("MainMeshCollision") : TEXT("Bounds")));
-	}
-	int32 LightweightBuildablesMatched = 0;
-	for (const auto& Pair : LightweightExclusions)
-	{
-		const FNoGrassLightweightKey& Key = Pair.Key;
-		const FNoGrassLightweightExclusion& Exclusion = Pair.Value;
-		if (!Exclusion.Bounds.IsValid ||
-			Exclusion.Bounds.ComputeSquaredDistanceToPoint(Center) > RadiusSquared)
-		{
-			continue;
-		}
-
-		++LightweightBuildablesMatched;
-		Lines.Add(FString::Printf(
-			TEXT("lightweight class=%s runtime-index=%d location=%s expanded-bounds=%s"),
-			*GetNameSafe(Key.BuildableClass),
-			Key.RuntimeIndex,
-			*Exclusion.Transform.GetLocation().ToCompactString(),
-			*Exclusion.Bounds.ToString()));
-	}
-	int32 BoundslessPowerPolesMatched = 0;
-	for (const auto& Pair : PowerPoleExclusionBounds)
-	{
-		if (!Pair.Value.IsValid || Pair.Value.ComputeSquaredDistanceToPoint(Center) > RadiusSquared)
-		{
-			continue;
-		}
-		++BoundslessPowerPolesMatched;
-		Lines.Add(FString::Printf(
-			TEXT("boundsless-power-pole class=%s location=%s fallback-bounds=%s"),
-			Pair.Key.IsValid() ? *GetNameSafe(Pair.Key->GetClass()) : TEXT("<invalid>"),
-			Pair.Key.IsValid() ? *Pair.Key->GetActorLocation().ToCompactString() : TEXT("<invalid>"),
-			*Pair.Value.ToString()));
-	}
-	int32 NearbyActorsMatched = 0;
-	for (TActorIterator<AActor> It(World); It; ++It)
-	{
-		AActor* Actor = *It;
-		if (!IsValid(Actor))
-		{
-			continue;
-		}
-
-		const FBox ActorBounds = Actor->GetComponentsBoundingBox(true);
-		const bool bLocationNearby = FVector::DistSquared(Actor->GetActorLocation(), Center) <= RadiusSquared;
-		const bool bBoundsNearby = ActorBounds.IsValid &&
-			ActorBounds.ComputeSquaredDistanceToPoint(Center) <= RadiusSquared;
-		if (!bLocationNearby && !bBoundsNearby)
-		{
-			continue;
-		}
-
-		++NearbyActorsMatched;
-		Lines.Add(FString::Printf(
-			TEXT("nearby-actor class=%s name=%s location=%s bounds=%s"),
-			*GetNameSafe(Actor->GetClass()),
-			*Actor->GetPathName(),
-			*Actor->GetActorLocation().ToCompactString(),
-			*ActorBounds.ToString()));
-	}
-	int32 NearbyPrimitiveComponentsMatched = 0;
-	for (TObjectIterator<UPrimitiveComponent> It; It; ++It)
-	{
-		UPrimitiveComponent* Component = *It;
-		if (!IsValid(Component) || Component->GetWorld() != World || !Component->IsRegistered() ||
-			Component->Bounds.GetBox().ComputeSquaredDistanceToPoint(Center) > RadiusSquared)
-		{
-			continue;
-		}
-
-		++NearbyPrimitiveComponentsMatched;
-		Lines.Add(FString::Printf(
-			TEXT("nearby-component class=%s name=%s owner-class=%s owner=%s bounds=%s"),
-			*GetNameSafe(Component->GetClass()),
-			*Component->GetPathName(),
-			Component->GetOwner() ? *GetNameSafe(Component->GetOwner()->GetClass()) : TEXT("<none>"),
-			Component->GetOwner() ? *Component->GetOwner()->GetPathName() : TEXT("<none>"),
-			*Component->Bounds.GetBox().ToString()));
-	}
-	int32 ComponentsMatched = 0;
-	int32 InstancesMatched = 0;
-	int32 CliffComponentsMatched = 0;
-	for (TObjectIterator<UGrassInstancedStaticMeshComponent> It; It; ++It)
-	{
-		UGrassInstancedStaticMeshComponent* Component = *It;
-		AFGCliffActor* Cliff = IsValid(Component)
-			? Component->GetTypedOuter<AFGCliffActor>()
-			: nullptr;
-		if (!IsValid(Cliff) || Component->GetWorld() != World ||
-			!Component->IsRegistered() ||
-			Component->Bounds.GetBox().ComputeSquaredDistanceToPoint(Center) > RadiusSquared)
-		{
-			continue;
-		}
-
-		++CliffComponentsMatched;
-		const UStaticMesh* Mesh = Component->GetStaticMesh();
-		Lines.Add(FString::Printf(
-			TEXT("cliff-render-instances=%d component=%s owner=%s mesh=%s"),
-			Component->GetNumRenderInstances(),
-			*Component->GetPathName(),
-			*Cliff->GetPathName(),
-			Mesh ? *Mesh->GetPathName() : TEXT("<none>")));
-	}
-	for (TObjectIterator<UHierarchicalInstancedStaticMeshComponent> It; It; ++It)
-	{
-		UHierarchicalInstancedStaticMeshComponent* Component = *It;
-		if (!IsValid(Component) || Component->GetWorld() != World || !Component->IsRegistered())
-		{
-			continue;
-		}
-
-		int32 NearbyInstances = 0;
-		TArray<FString> NearbyInstanceLines;
-		FTransform InstanceTransform;
-		for (int32 Index = 0; Index < Component->GetInstanceCount(); ++Index)
-		{
-			if (Component->GetInstanceTransform(Index, InstanceTransform, true) &&
-				FVector::DistSquared(InstanceTransform.GetLocation(), Center) <= RadiusSquared)
-			{
-				++NearbyInstances;
-				NearbyInstanceLines.Add(FString::Printf(
-					TEXT("  instance-index=%d location=%s scale=%s covered=%s"),
-					Index,
-					*InstanceTransform.GetLocation().ToCompactString(),
-					*InstanceTransform.GetScale3D().ToCompactString(),
-					IsLocationCovered(InstanceTransform.GetLocation()) ? TEXT("true") : TEXT("false")));
-			}
-		}
-		if (NearbyInstances <= 0)
-		{
-			continue;
-		}
-
-		++ComponentsMatched;
-		InstancesMatched += NearbyInstances;
-		const UStaticMesh* Mesh = Component->GetStaticMesh();
-		Lines.Add(FString::Printf(
-			TEXT("instances=%d component=%s owner=%s mesh=%s mesh-extent=%s filtered=%s"),
-			NearbyInstances,
-			*Component->GetPathName(),
-			Component->GetOwner() ? *Component->GetOwner()->GetPathName() : TEXT("<none>"),
-			Mesh ? *Mesh->GetPathName() : TEXT("<none>"),
-			Mesh ? *Mesh->GetBounds().BoxExtent.ToCompactString() : TEXT("<none>"),
-			IsDecorativeGroundFoliage(Component) ? TEXT("true") : TEXT("false")));
-		Lines.Append(NearbyInstanceLines);
-	}
-	Lines.Add(FString::Printf(
-		TEXT("summary: buildables=%d lightweight-buildables=%d boundsless-power-poles=%d nearby-actors=%d nearby-primitive-components=%d components=%d instances=%d cliff-components=%d"),
-		BuildablesMatched,
-		LightweightBuildablesMatched,
-		BoundslessPowerPolesMatched,
-		NearbyActorsMatched,
-		NearbyPrimitiveComponentsMatched,
-		ComponentsMatched,
-		InstancesMatched,
-		CliffComponentsMatched));
-
-	const FString OutputPath = FPaths::Combine(
-		FPaths::ProjectLogDir(),
-		TEXT("NoGrassUnderBuildings-Scan.txt"));
-	FFileHelper::SaveStringArrayToFile(Lines, *OutputPath);
-	UE_LOG(
-		LogNoGrassUnderBuildings,
-		Display,
-		TEXT("Nearby foliage scan complete: components=%d instances=%d file=%s"),
-		ComponentsMatched,
-		InstancesMatched,
-		*OutputPath);
-}
 
 bool FNoGrassUnderBuildingsModule::IsDecorativeGroundFoliage(
 	const UHierarchicalInstancedStaticMeshComponent* Component) const
@@ -661,8 +333,11 @@ void FNoGrassUnderBuildingsModule::ReconcileDecorativeFoliage(
 			for (const int32 InstanceIndex : Component->GetInstancesOverlappingBox(Bounds, true))
 			{
 				FTransform InstanceTransform;
-				if (Component->GetInstanceTransform(InstanceIndex, InstanceTransform, true) &&
-					IsLocationCovered(InstanceTransform.GetLocation()))
+				if (!Component->GetInstanceTransform(InstanceIndex, InstanceTransform, true))
+				{
+					continue;
+				}
+				if (IsLocationCovered(InstanceTransform.GetLocation()))
 				{
 					DesiredSuppression.Add({Component, InstanceIndex});
 				}
@@ -894,9 +569,13 @@ void FNoGrassUnderBuildingsModule::HandlePostWorldInitialization(
 		ExclusionBounds.Empty();
 		CollisionFootprints.Empty();
 		BuildableCoverageGrid.Empty();
+		VehiclePathExclusions.Empty();
+		VehiclePathCoverageGrid.Empty();
 		PowerPoleExclusionBounds.Empty();
 		PowerPoleCoverageGrid.Empty();
 		NextBuildableScanAt = 0.0;
+		NextVehiclePathSettingCheckAt = 0.0;
+		bVehiclePathsEnabled = FNoGrassUnderBuildingsConfigurationStruct::ShouldEnableVehiclePaths(World);
 		bInitialBuildableScanComplete = false;
 		LastLightweightClassCount = INDEX_NONE;
 		LastLightweightInstanceCount = INDEX_NONE;
@@ -950,9 +629,13 @@ void FNoGrassUnderBuildingsModule::HandleWorldCleanup(
 		ExclusionBounds.Empty();
 		CollisionFootprints.Empty();
 		BuildableCoverageGrid.Empty();
+		VehiclePathExclusions.Empty();
+		VehiclePathCoverageGrid.Empty();
 		PowerPoleExclusionBounds.Empty();
 		PowerPoleCoverageGrid.Empty();
 		NextBuildableScanAt = 0.0;
+		NextVehiclePathSettingCheckAt = 0.0;
+		bVehiclePathsEnabled = true;
 		bInitialBuildableScanComplete = false;
 		LastLightweightClassCount = INDEX_NONE;
 		LastLightweightInstanceCount = INDEX_NONE;
@@ -979,6 +662,16 @@ void FNoGrassUnderBuildingsModule::HandleWorldPostActorTick(
 	}
 
 	const double Now = World->GetTimeSeconds();
+	if (Now >= NextVehiclePathSettingCheckAt)
+	{
+		NextVehiclePathSettingCheckAt = Now + 1.0;
+		const bool bSettingEnabled =
+			FNoGrassUnderBuildingsConfigurationStruct::ShouldEnableVehiclePaths(World);
+		if (bSettingEnabled != bVehiclePathsEnabled)
+		{
+			ApplyVehiclePathSetting(World, bSettingEnabled);
+		}
+	}
 	if (!bInitialBuildableScanComplete && Now >= NextBuildableScanAt)
 	{
 		ScanBuildables(World);
@@ -996,8 +689,9 @@ void FNoGrassUnderBuildingsModule::HandleWorldPostActorTick(
 		UE_LOG(
 			LogNoGrassUnderBuildings,
 			Display,
-			TEXT("Coverage spatial index: regular-cells=%d lightweight-cells=%d"),
+			TEXT("Coverage spatial index: regular-cells=%d vehicle-path-cells=%d lightweight-cells=%d"),
 			BuildableCoverageGrid.Num(),
+			VehiclePathCoverageGrid.Num(),
 			LightweightCoverageGrid.Num());
 	}
 
@@ -1121,6 +815,12 @@ void FNoGrassUnderBuildingsModule::HandleBuildableAdded(
 		return;
 	}
 	const TWeakObjectPtr<AFGBuildable> Key(Buildable);
+	if (AFGVehiclePathSegment* PathSegment = Cast<AFGVehiclePathSegment>(Buildable))
+	{
+		KnownBuildables.Add(Key);
+		HandleVehiclePathAdded(AFGVehicleSubsystem::Get(World), PathSegment);
+		return;
+	}
 	if (ExclusionBounds.Contains(Key))
 	{
 		return;
@@ -1151,6 +851,12 @@ void FNoGrassUnderBuildingsModule::HandleBuildableRemoved(
 	}
 
 	const TWeakObjectPtr<AFGBuildable> Key(Buildable);
+	if (VehiclePathExclusions.Contains(Key))
+	{
+		RemoveVehiclePathExclusion(Key, true);
+		KnownBuildables.Remove(Key);
+		return;
+	}
 	const FBox* StoredBounds = ExclusionBounds.Find(Key);
 	if (!StoredBounds)
 	{
@@ -1165,6 +871,49 @@ void FNoGrassUnderBuildingsModule::HandleBuildableRemoved(
 	{
 		QueueCoverageRefresh(PreviousBounds, TEXT("buildable-removed"));
 	}
+}
+
+void FNoGrassUnderBuildingsModule::HandleVehiclePathAdded(
+	AFGVehicleSubsystem* Subsystem,
+	AFGVehiclePathSegment* PathSegment)
+{
+	UWorld* World = IsValid(Subsystem) ? Subsystem->GetWorld() : nullptr;
+	if (!bVehiclePathsEnabled || !bInitialBuildableScanComplete || World != ActiveGameWorld.Get() ||
+		!IsValid(PathSegment) || PathSegment->GetWorld() != World)
+	{
+		return;
+	}
+
+	const TWeakObjectPtr<AFGBuildable> Key(PathSegment);
+	if (VehiclePathExclusions.Contains(Key))
+	{
+		return;
+	}
+
+	KnownBuildables.Add(Key);
+	AddVehiclePathExclusion(PathSegment, false);
+	if (const FNoGrassVehiclePathExclusion* Exclusion = VehiclePathExclusions.Find(Key))
+	{
+		for (const FBox& Bounds : Exclusion->SegmentBounds)
+		{
+			QueueCoverageRefresh(Bounds, TEXT("vehicle-path-added"));
+		}
+	}
+}
+
+void FNoGrassUnderBuildingsModule::HandleVehiclePathRemoved(
+	AFGVehicleSubsystem* Subsystem,
+	AFGVehiclePathSegment* PathSegment)
+{
+	UWorld* World = IsValid(Subsystem) ? Subsystem->GetWorld() : nullptr;
+	if (!bInitialBuildableScanComplete || World != ActiveGameWorld.Get() || !PathSegment)
+	{
+		return;
+	}
+
+	const TWeakObjectPtr<AFGBuildable> Key(PathSegment);
+	RemoveVehiclePathExclusion(Key, true);
+	KnownBuildables.Remove(Key);
 }
 
 void FNoGrassUnderBuildingsModule::HandleLightweightAdded(
@@ -1466,6 +1215,68 @@ void FNoGrassUnderBuildingsModule::RemoveBuildableFromCoverageGrid(
 	}
 }
 
+void FNoGrassUnderBuildingsModule::AddVehiclePathToCoverageGrid(
+	const TWeakObjectPtr<AFGBuildable>& PathSegment,
+	const TArray<FBox>& SegmentBounds)
+{
+	if (!PathSegment.IsValid())
+	{
+		return;
+	}
+	for (const FBox& Bounds : SegmentBounds)
+	{
+		FIntVector MinCell;
+		FIntVector MaxCell;
+		if (!TryGetCoverageGridRange(Bounds, MinCell, MaxCell))
+		{
+			continue;
+		}
+		for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
+		{
+			for (int32 Y = MinCell.Y; Y <= MaxCell.Y; ++Y)
+			{
+				for (int32 Z = MinCell.Z; Z <= MaxCell.Z; ++Z)
+				{
+					VehiclePathCoverageGrid.FindOrAdd(FIntVector(X, Y, Z)).Add(PathSegment);
+				}
+			}
+		}
+	}
+}
+
+void FNoGrassUnderBuildingsModule::RemoveVehiclePathFromCoverageGrid(
+	const TWeakObjectPtr<AFGBuildable>& PathSegment,
+	const TArray<FBox>& SegmentBounds)
+{
+	for (const FBox& Bounds : SegmentBounds)
+	{
+		FIntVector MinCell;
+		FIntVector MaxCell;
+		if (!TryGetCoverageGridRange(Bounds, MinCell, MaxCell))
+		{
+			continue;
+		}
+		for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
+		{
+			for (int32 Y = MinCell.Y; Y <= MaxCell.Y; ++Y)
+			{
+				for (int32 Z = MinCell.Z; Z <= MaxCell.Z; ++Z)
+				{
+					const FIntVector Cell(X, Y, Z);
+					if (TSet<TWeakObjectPtr<AFGBuildable>>* Entries = VehiclePathCoverageGrid.Find(Cell))
+					{
+						Entries->Remove(PathSegment);
+						if (Entries->IsEmpty())
+						{
+							VehiclePathCoverageGrid.Remove(Cell);
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
 void FNoGrassUnderBuildingsModule::AddPowerPoleToCoverageGrid(
 	const TWeakObjectPtr<AActor>& Pole,
 	const FBox& Bounds)
@@ -1607,6 +1418,7 @@ void FNoGrassUnderBuildingsModule::GatherCoverageBounds(
 		return;
 	}
 	TSet<TWeakObjectPtr<AFGBuildable>> SeenBuildables;
+	TSet<TWeakObjectPtr<AFGBuildable>> SeenVehiclePaths;
 	TSet<FNoGrassLightweightKey> SeenLightweights;
 	TSet<TWeakObjectPtr<AActor>> SeenPowerPoles;
 	for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
@@ -1627,6 +1439,27 @@ void FNoGrassUnderBuildingsModule::GatherCoverageBounds(
 								Bounds && Bounds->IsValid && Bounds->Intersect(QueryBounds))
 							{
 								OutBounds.Add(*Bounds);
+							}
+						}
+					}
+				}
+				if (const TSet<TWeakObjectPtr<AFGBuildable>>* Entries = VehiclePathCoverageGrid.Find(Cell))
+				{
+					for (const TWeakObjectPtr<AFGBuildable>& Key : *Entries)
+					{
+						if (SeenVehiclePaths.Contains(Key))
+						{
+							continue;
+						}
+						SeenVehiclePaths.Add(Key);
+						if (const FNoGrassVehiclePathExclusion* Exclusion = VehiclePathExclusions.Find(Key))
+						{
+							for (const FBox& Bounds : Exclusion->SegmentBounds)
+							{
+								if (Bounds.Intersect(QueryBounds))
+								{
+									OutBounds.Add(Bounds);
+								}
 							}
 						}
 					}
@@ -1682,6 +1515,17 @@ bool FNoGrassUnderBuildingsModule::IsLocationCovered(const FVector& Location) co
 			}
 			else if (const FBox* Bounds = ExclusionBounds.Find(Key);
 				Bounds && Bounds->IsValid && Bounds->IsInsideOrOn(Location))
+			{
+				return true;
+			}
+		}
+	}
+	if (const TSet<TWeakObjectPtr<AFGBuildable>>* Entries = VehiclePathCoverageGrid.Find(Cell))
+	{
+		for (const TWeakObjectPtr<AFGBuildable>& Key : *Entries)
+		{
+			if (const FNoGrassVehiclePathExclusion* Exclusion = VehiclePathExclusions.Find(Key);
+				Exclusion && IsVehiclePathCovered(*Exclusion, Location))
 			{
 				return true;
 			}
@@ -1867,6 +1711,186 @@ void FNoGrassUnderBuildingsModule::ClearLightweightExclusions(UWorld* World, boo
 	}
 }
 
+bool FNoGrassUnderBuildingsModule::BuildVehiclePathExclusion(
+	AFGVehiclePathSegment* PathSegment,
+	FNoGrassVehiclePathExclusion& OutExclusion) const
+{
+	if (!IsValid(PathSegment))
+	{
+		return false;
+	}
+	USplineComponent* Spline = PathSegment->GetSplineComponent();
+	if (!IsValid(Spline))
+	{
+		return false;
+	}
+
+	const float SplineLength = Spline->GetSplineLength();
+	if (!FMath::IsFinite(SplineLength) || SplineLength <= KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	const FVector VehicleExtents = PathSegment->CalculateLargestAllowedVehicleExtents();
+	const float VehicleHalfWidth = FMath::IsFinite(VehicleExtents.Y) && VehicleExtents.Y >= 50.0f
+		? FMath::Abs(VehicleExtents.Y)
+		: 250.0f;
+	const float VehicleHalfHeight = FMath::IsFinite(VehicleExtents.Z) && VehicleExtents.Z >= 50.0f
+		? FMath::Abs(VehicleExtents.Z)
+		: 150.0f;
+	OutExclusion.HalfWidth = FMath::Clamp(VehicleHalfWidth + 100.0f, 200.0f, 600.0f);
+	OutExclusion.VerticalTolerance = FMath::Clamp(VehicleHalfHeight + 200.0f, 300.0f, 1000.0f);
+
+	constexpr float DesiredSampleSpacing = 200.0f;
+	constexpr int32 MaxSampleIntervals = 4096;
+	const int32 IntervalCount = FMath::Clamp(
+		FMath::CeilToInt(SplineLength / DesiredSampleSpacing),
+		1,
+		MaxSampleIntervals);
+	OutExclusion.SamplePoints.Reserve(IntervalCount + 1);
+	OutExclusion.SegmentBounds.Reserve(IntervalCount);
+	for (int32 Index = 0; Index <= IntervalCount; ++Index)
+	{
+		const float Distance = SplineLength * static_cast<float>(Index) /
+			static_cast<float>(IntervalCount);
+		const FVector Point = Spline->GetLocationAtDistanceAlongSpline(
+			Distance,
+			ESplineCoordinateSpace::World);
+		if (!FMath::IsFinite(Point.X) || !FMath::IsFinite(Point.Y) || !FMath::IsFinite(Point.Z))
+		{
+			return false;
+		}
+		OutExclusion.SamplePoints.Add(Point);
+		if (Index > 0)
+		{
+			FBox SegmentBounds(ForceInit);
+			SegmentBounds += OutExclusion.SamplePoints[Index - 1];
+			SegmentBounds += Point;
+			OutExclusion.SegmentBounds.Add(SegmentBounds.ExpandBy(FVector(
+				OutExclusion.HalfWidth,
+				OutExclusion.HalfWidth,
+				OutExclusion.VerticalTolerance)));
+		}
+	}
+	return OutExclusion.SamplePoints.Num() >= 2 && !OutExclusion.SegmentBounds.IsEmpty();
+}
+
+bool FNoGrassUnderBuildingsModule::IsVehiclePathCovered(
+	const FNoGrassVehiclePathExclusion& Exclusion,
+	const FVector& Location) const
+{
+	const float WidthSquared = FMath::Square(Exclusion.HalfWidth);
+	for (int32 Index = 1; Index < Exclusion.SamplePoints.Num(); ++Index)
+	{
+		const FVector& Start = Exclusion.SamplePoints[Index - 1];
+		const FVector& End = Exclusion.SamplePoints[Index];
+		const FVector2D StartXY(Start.X, Start.Y);
+		const FVector2D EndXY(End.X, End.Y);
+		const FVector2D LocationXY(Location.X, Location.Y);
+		const FVector2D Delta = EndXY - StartXY;
+		const float LengthSquared = Delta.SizeSquared();
+		const float Alpha = LengthSquared > SMALL_NUMBER
+			? FMath::Clamp(FVector2D::DotProduct(LocationXY - StartXY, Delta) / LengthSquared, 0.0f, 1.0f)
+			: 0.0f;
+		const FVector2D ClosestXY = StartXY + Delta * Alpha;
+		const float ClosestZ = FMath::Lerp(Start.Z, End.Z, Alpha);
+		if (FVector2D::DistSquared(LocationXY, ClosestXY) <= WidthSquared &&
+			FMath::Abs(Location.Z - ClosestZ) <= Exclusion.VerticalTolerance)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void FNoGrassUnderBuildingsModule::AddVehiclePathExclusion(
+	AFGVehiclePathSegment* PathSegment,
+	bool bRefresh)
+{
+	if (!bVehiclePathsEnabled || !IsValid(PathSegment))
+	{
+		return;
+	}
+	const TWeakObjectPtr<AFGBuildable> Key(PathSegment);
+	if (VehiclePathExclusions.Contains(Key))
+	{
+		return;
+	}
+
+	FNoGrassVehiclePathExclusion Exclusion;
+	if (!BuildVehiclePathExclusion(PathSegment, Exclusion))
+	{
+		return;
+	}
+	AddVehiclePathToCoverageGrid(Key, Exclusion.SegmentBounds);
+	VehiclePathExclusions.Add(Key, MoveTemp(Exclusion));
+	if (bRefresh)
+	{
+		if (const FNoGrassVehiclePathExclusion* Added = VehiclePathExclusions.Find(Key))
+		{
+			for (const FBox& Bounds : Added->SegmentBounds)
+			{
+				QueueCoverageRefresh(Bounds, TEXT("vehicle-path-added"));
+			}
+		}
+	}
+}
+
+void FNoGrassUnderBuildingsModule::ApplyVehiclePathSetting(UWorld* World, bool bEnabled)
+{
+	if (!World || World != ActiveGameWorld.Get() || bEnabled == bVehiclePathsEnabled)
+	{
+		return;
+	}
+
+	bVehiclePathsEnabled = bEnabled;
+	if (bEnabled)
+	{
+		int32 Added = 0;
+		for (TActorIterator<AFGVehiclePathSegment> It(World); It; ++It)
+		{
+			AFGVehiclePathSegment* PathSegment = *It;
+			if (!IsValid(PathSegment)) continue;
+			const int32 PreviousCount = VehiclePathExclusions.Num();
+			AddVehiclePathExclusion(PathSegment, true);
+			Added += VehiclePathExclusions.Num() > PreviousCount ? 1 : 0;
+		}
+		UE_LOG(LogNoGrassUnderBuildings, Display,
+			TEXT("Vehicle path foliage enabled: tracked=%d"), Added);
+		return;
+	}
+
+	TArray<TWeakObjectPtr<AFGBuildable>> Paths;
+	VehiclePathExclusions.GetKeys(Paths);
+	for (const TWeakObjectPtr<AFGBuildable>& Path : Paths)
+	{
+		RemoveVehiclePathExclusion(Path, true);
+	}
+	UE_LOG(LogNoGrassUnderBuildings, Display,
+		TEXT("Vehicle path foliage disabled: restored-routes=%d"), Paths.Num());
+}
+
+void FNoGrassUnderBuildingsModule::RemoveVehiclePathExclusion(
+	const TWeakObjectPtr<AFGBuildable>& PathSegment,
+	bool bRefresh)
+{
+	const FNoGrassVehiclePathExclusion* Existing = VehiclePathExclusions.Find(PathSegment);
+	if (!Existing)
+	{
+		return;
+	}
+	const TArray<FBox> PreviousBounds = Existing->SegmentBounds;
+	RemoveVehiclePathFromCoverageGrid(PathSegment, PreviousBounds);
+	VehiclePathExclusions.Remove(PathSegment);
+	if (bRefresh)
+	{
+		for (const FBox& Bounds : PreviousBounds)
+		{
+			QueueCoverageRefresh(Bounds, TEXT("vehicle-path-removed"));
+		}
+	}
+}
+
 void FNoGrassUnderBuildingsModule::ScanBuildables(UWorld* World)
 {
 	TSet<TWeakObjectPtr<AFGBuildable>> CurrentBuildables;
@@ -1891,7 +1915,11 @@ void FNoGrassUnderBuildingsModule::ScanBuildables(UWorld* World)
 				AddLandscapeExclusion(Buildable.Get(), bRefreshImmediately);
 				if (!bRefreshImmediately)
 				{
-					if (const FBox* Bounds = ExclusionBounds.Find(Buildable))
+					if (const FNoGrassVehiclePathExclusion* PathExclusion = VehiclePathExclusions.Find(Buildable))
+					{
+						InitialRefreshBounds.Append(PathExclusion->SegmentBounds);
+					}
+					else if (const FBox* Bounds = ExclusionBounds.Find(Buildable))
 					{
 						InitialRefreshBounds.Add(*Bounds);
 					}
@@ -1906,7 +1934,11 @@ void FNoGrassUnderBuildingsModule::ScanBuildables(UWorld* World)
 		if (!CurrentBuildables.Contains(Buildable))
 		{
 			++Removed;
-			if (ExcludedBuildables.Contains(Buildable))
+			if (VehiclePathExclusions.Contains(Buildable))
+			{
+				RemoveVehiclePathExclusion(Buildable);
+			}
+			else if (ExcludedBuildables.Contains(Buildable))
 			{
 				RemoveLandscapeExclusion(Buildable);
 			}
@@ -2047,6 +2079,11 @@ void FNoGrassUnderBuildingsModule::AddLandscapeExclusion(
 	{
 		return;
 	}
+	if (AFGVehiclePathSegment* PathSegment = Cast<AFGVehiclePathSegment>(Buildable))
+	{
+		AddVehiclePathExclusion(PathSegment, bRefresh);
+		return;
+	}
 
 	const FBox Bounds = GetLandscapeExclusionBounds(Buildable);
 	if (!Bounds.IsValid)
@@ -2100,6 +2137,11 @@ void FNoGrassUnderBuildingsModule::RemoveLandscapeExclusion(
 	const TWeakObjectPtr<AFGBuildable>& Buildable,
 	bool bRefresh)
 {
+	if (VehiclePathExclusions.Contains(Buildable))
+	{
+		RemoveVehiclePathExclusion(Buildable, bRefresh);
+		return;
+	}
 	UWorld* World = ActiveGameWorld.Get();
 	FBox PreviousBounds(ForceInit);
 	if (const FBox* StoredBounds = ExclusionBounds.Find(Buildable))
