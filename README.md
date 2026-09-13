@@ -14,9 +14,9 @@ Stops grass and small decorative ground vegetation from poking through foundatio
 - Avoids refreshing areas that remain covered by another tracked building.
 - Uses a precise, precomputed physical footprint for the Space Elevator instead of its enormous orbital bounds.
 
-The mod does not automatically remove trees, bushes, berries, resource plants, or other valuable foliage. Those should still be removed using normal game tools.
+- optional vehicle path clearing
 
-No configuration is required or provided.
+The mod does not automatically remove trees, bushes, berries, resource plants, or other valuable foliage. Those should still be removed using normal game tools.
 
 ## Compatibility
 
