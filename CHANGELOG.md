@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.10
+
+- Replaced oversized actor bounds with cached, collision-derived footprints for stock and modded buildings.
+- Improved clearing around irregular structures while preserving grass outside their physical footprint.
+- Added a small edge margin so leaning grass blades do not protrude into building walls and feet.
+- Excluded suspended power wires so cables no longer clear strips of grass between poles.
+- Kept the Space Elevator's validated custom footprint and event-driven nearby-only processing.
+
 ## 1.3.9
 
 - Added optional foliage clearing along saved vehicle paths, enabled by default.

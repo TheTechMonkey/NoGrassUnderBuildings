@@ -54,10 +54,27 @@ struct FNoGrassLightweightExclusion
 	FTransform Transform = FTransform::Identity;
 };
 
+struct FNoGrassFootprintRun
+{
+	int32 MinCellX = 0;
+	int32 MaxCellX = INDEX_NONE;
+};
+
+struct FNoGrassFootprintTemplate
+{
+	FBox LocalBounds{ForceInit};
+	double CellSize = 50.0;
+	TMap<int32, TArray<FNoGrassFootprintRun>> Rows;
+	int32 OccupiedCellCount = 0;
+};
+
 struct FNoGrassCollisionFootprint
 {
 	FBox Bounds{ForceInit};
+	FTransform ActorTransform = FTransform::Identity;
 	FTransform ComponentTransform = FTransform::Identity;
+	TSharedPtr<const FNoGrassFootprintTemplate> Template;
+	bool bUsesSpaceElevatorMask = false;
 };
 
 struct FNoGrassVehiclePathExclusion
@@ -147,6 +164,8 @@ private:
 	bool IsCollisionFootprintCovered(
 		const TWeakObjectPtr<AFGBuildable>& Buildable,
 		const FVector& Location) const;
+	TSharedPtr<const FNoGrassFootprintTemplate> GetOrCreateFootprintTemplate(AFGBuildable* Buildable);
+	TSharedPtr<const FNoGrassFootprintTemplate> BuildFootprintTemplate(AFGBuildable* Buildable) const;
 	void AddLandscapeExclusion(AFGBuildable* Buildable, bool bRefresh = true);
 	void RemoveLandscapeExclusion(
 		const TWeakObjectPtr<AFGBuildable>& Buildable,
@@ -164,6 +183,7 @@ private:
 	TSet<TWeakObjectPtr<AFGBuildable>> ExcludedBuildables;
 	TMap<TWeakObjectPtr<AFGBuildable>, FBox> ExclusionBounds;
 	TMap<TWeakObjectPtr<AFGBuildable>, FNoGrassCollisionFootprint> CollisionFootprints;
+	TMap<UClass*, TSharedPtr<const FNoGrassFootprintTemplate>> FootprintTemplates;
 	TMap<FIntVector, TSet<TWeakObjectPtr<AFGBuildable>>> BuildableCoverageGrid;
 	TMap<TWeakObjectPtr<AFGBuildable>, FNoGrassVehiclePathExclusion> VehiclePathExclusions;
 	TMap<FIntVector, TSet<TWeakObjectPtr<AFGBuildable>>> VehiclePathCoverageGrid;
@@ -186,5 +206,5 @@ private:
 	uint64 AppliedFoliageRevision = MAX_uint64;
 	static constexpr double CoverageGridCellSize = 2000.0;
 	static constexpr int64 CoverageGridMaxCellsPerBounds = 65536;
-	static constexpr double CollisionFootprintCellSize = 25.0;
+	static constexpr double SpaceElevatorFootprintCellSize = 25.0;
 };

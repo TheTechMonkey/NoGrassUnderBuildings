@@ -2,6 +2,7 @@
 #include "NoGrassUnderBuildingsConfiguration.h"
 
 #include "Buildables/FGBuildable.h"
+#include "Buildables/FGBuildableWire.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
@@ -29,6 +30,11 @@ namespace
 {
 	constexpr double GNoGrassMaxComponentSpan = 100000.0;
 	constexpr double GNoGrassMaxComponentDistance = 200000.0;
+	constexpr double GNoGrassFootprintPadding = 150.0;
+	constexpr double GNoGrassFootprintVerticalPadding = 200.0;
+	constexpr double GNoGrassMinimumFootprintCellSize = 50.0;
+	constexpr double GNoGrassFootprintCellStep = 25.0;
+	constexpr double GNoGrassTargetFootprintCellTests = 50000.0;
 
 	bool IsFiniteBox(const FBox& Bounds)
 	{
@@ -52,6 +58,62 @@ namespace
 			FMath::Abs(CenterOffset.X) <= GNoGrassMaxComponentDistance &&
 			FMath::Abs(CenterOffset.Y) <= GNoGrassMaxComponentDistance &&
 			FMath::Abs(CenterOffset.Z) <= GNoGrassMaxComponentDistance;
+	}
+
+	FBox TransformBoxBetweenSpaces(
+		const FBox& Box,
+		const FTransform& SourceToWorld,
+		const FTransform& DestinationToWorld)
+	{
+		FBox Result(ForceInit);
+		for (int32 X = 0; X < 2; ++X)
+		{
+			for (int32 Y = 0; Y < 2; ++Y)
+			{
+				for (int32 Z = 0; Z < 2; ++Z)
+				{
+					const FVector SourcePoint(
+						X ? Box.Max.X : Box.Min.X,
+						Y ? Box.Max.Y : Box.Min.Y,
+						Z ? Box.Max.Z : Box.Min.Z);
+					Result += DestinationToWorld.InverseTransformPosition(
+						SourceToWorld.TransformPosition(SourcePoint));
+				}
+			}
+		}
+		return Result;
+	}
+
+	bool SegmentIntersectsBox(const FVector& Start, const FVector& End, const FBox& Box)
+	{
+		double MinTime = 0.0;
+		double MaxTime = 1.0;
+		const FVector Delta = End - Start;
+		for (int32 Axis = 0; Axis < 3; ++Axis)
+		{
+			if (FMath::Abs(Delta[Axis]) < UE_DOUBLE_SMALL_NUMBER)
+			{
+				if (Start[Axis] < Box.Min[Axis] || Start[Axis] > Box.Max[Axis])
+				{
+					return false;
+				}
+				continue;
+			}
+
+			double First = (Box.Min[Axis] - Start[Axis]) / Delta[Axis];
+			double Last = (Box.Max[Axis] - Start[Axis]) / Delta[Axis];
+			if (First > Last)
+			{
+				Swap(First, Last);
+			}
+			MinTime = FMath::Max(MinTime, First);
+			MaxTime = FMath::Min(MaxTime, Last);
+			if (MinTime > MaxTime)
+			{
+				return false;
+			}
+		}
+		return true;
 	}
 }
 
@@ -836,7 +898,10 @@ void FNoGrassUnderBuildingsModule::HandleBuildableAdded(
 	AddLandscapeExclusion(Buildable, false);
 	if (!bAlreadyCovered)
 	{
-		QueueCoverageRefresh(Bounds, TEXT("buildable-added"));
+		if (const FBox* AddedBounds = ExclusionBounds.Find(Key))
+		{
+			QueueCoverageRefresh(*AddedBounds, TEXT("buildable-added"));
+		}
 	}
 }
 
@@ -1966,7 +2031,10 @@ void FNoGrassUnderBuildingsModule::ScanBuildables(UWorld* World)
 
 FBox FNoGrassUnderBuildingsModule::GetLandscapeExclusionBounds(AFGBuildable* Buildable) const
 {
-	if (!IsValid(Buildable))
+	// Suspended power wires are buildables for save/dismantle purposes, but they
+	// do not occupy ground. Projecting their spline collision creates a bare strip
+	// between poles.
+	if (!IsValid(Buildable) || Buildable->IsA<AFGBuildableWire>())
 	{
 		return FBox(ForceInit);
 	}
@@ -2043,6 +2111,288 @@ FBox FNoGrassUnderBuildingsModule::GetLandscapeExclusionBounds(AFGBuildable* Bui
 			: FVector(100.0f, 100.0f, 200.0f));
 }
 
+TSharedPtr<const FNoGrassFootprintTemplate> FNoGrassUnderBuildingsModule::GetOrCreateFootprintTemplate(
+	AFGBuildable* Buildable)
+{
+	if (!IsValid(Buildable) || !Buildable->GetClass())
+	{
+		return nullptr;
+	}
+
+	if (const TSharedPtr<const FNoGrassFootprintTemplate>* Existing =
+		FootprintTemplates.Find(Buildable->GetClass()))
+	{
+		return *Existing;
+	}
+
+	const double StartedAt = FPlatformTime::Seconds();
+	TSharedPtr<const FNoGrassFootprintTemplate> Result = BuildFootprintTemplate(Buildable);
+	FootprintTemplates.Add(Buildable->GetClass(), Result);
+	const double ElapsedMs = (FPlatformTime::Seconds() - StartedAt) * 1000.0;
+	if (Result)
+	{
+		if (ElapsedMs >= 10.0)
+		{
+			UE_LOG(
+				LogNoGrassUnderBuildings,
+				Display,
+				TEXT("Slow physical-footprint cache: class=%s cells=%d rows=%d resolution=%.0fcm time=%.2fms"),
+				*GetNameSafe(Buildable->GetClass()),
+				Result->OccupiedCellCount,
+				Result->Rows.Num(),
+				Result->CellSize,
+				ElapsedMs);
+		}
+		else
+		{
+			UE_LOG(
+				LogNoGrassUnderBuildings,
+				Verbose,
+				TEXT("Cached physical footprint: class=%s cells=%d rows=%d resolution=%.0fcm time=%.2fms"),
+				*GetNameSafe(Buildable->GetClass()),
+				Result->OccupiedCellCount,
+				Result->Rows.Num(),
+				Result->CellSize,
+				ElapsedMs);
+		}
+	}
+	return Result;
+}
+
+TSharedPtr<const FNoGrassFootprintTemplate> FNoGrassUnderBuildingsModule::BuildFootprintTemplate(
+	AFGBuildable* Buildable) const
+{
+	if (!IsValid(Buildable))
+	{
+		return nullptr;
+	}
+
+	struct FPhysicalComponent
+	{
+		UPrimitiveComponent* Component = nullptr;
+		FTransform Transform = FTransform::Identity;
+		FBox LocalBounds{ForceInit};
+		FBox ActorBounds{ForceInit};
+	};
+
+	const FTransform ActorTransform = Buildable->GetActorTransform();
+	TArray<FPhysicalComponent> CollisionComponents;
+	TArray<FPhysicalComponent> VisibleComponents;
+	TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(Buildable);
+	for (UPrimitiveComponent* Component : PrimitiveComponents)
+	{
+		if (!IsValid(Component) || !Component->IsRegistered())
+		{
+			continue;
+		}
+
+		const FBox WorldBounds = Component->Bounds.GetBox();
+		const FBox ComponentLocalBounds = Component->CalcBounds(FTransform::Identity).GetBox();
+		if (!IsUsableComponentBounds(WorldBounds, Buildable->GetActorLocation()) ||
+			!IsFiniteBox(ComponentLocalBounds))
+		{
+			continue;
+		}
+
+		FPhysicalComponent PhysicalComponent;
+		PhysicalComponent.Component = Component;
+		PhysicalComponent.Transform = Component->GetComponentTransform();
+		PhysicalComponent.LocalBounds = ComponentLocalBounds;
+		PhysicalComponent.ActorBounds = TransformBoxBetweenSpaces(
+			ComponentLocalBounds,
+			PhysicalComponent.Transform,
+			ActorTransform);
+		if (!IsFiniteBox(PhysicalComponent.ActorBounds))
+		{
+			continue;
+		}
+
+		VisibleComponents.Add(PhysicalComponent);
+		if (Component->GetCollisionEnabled() != ECollisionEnabled::NoCollision)
+		{
+			CollisionComponents.Add(MoveTemp(PhysicalComponent));
+		}
+	}
+
+	// Physical collision is the best generic signal for stock and modded buildings.
+	// A few buildables ship without query collision, so retain a component-bounds
+	// fallback rather than losing their foliage exclusion entirely.
+	const TArray<FPhysicalComponent>& Components =
+		CollisionComponents.IsEmpty() ? VisibleComponents : CollisionComponents;
+	if (Components.IsEmpty())
+	{
+		return nullptr;
+	}
+
+	double EstimatedArea = 0.0;
+	FBox LocalFootprintBounds(ForceInit);
+	for (const FPhysicalComponent& Component : Components)
+	{
+		const FVector Size = Component.ActorBounds.GetSize();
+		EstimatedArea +=
+			(Size.X + GNoGrassFootprintPadding * 2.0) *
+			(Size.Y + GNoGrassFootprintPadding * 2.0);
+		LocalFootprintBounds += Component.ActorBounds;
+	}
+	if (!IsFiniteBox(LocalFootprintBounds))
+	{
+		return nullptr;
+	}
+
+	const double AdaptiveCellSize = FMath::Sqrt(
+		FMath::Max(EstimatedArea, 1.0) / GNoGrassTargetFootprintCellTests);
+	const double CellSize = FMath::Max(
+		GNoGrassMinimumFootprintCellSize,
+		FMath::CeilToDouble(AdaptiveCellSize / GNoGrassFootprintCellStep) * GNoGrassFootprintCellStep);
+	TSet<FIntPoint> OccupiedCells;
+	TSet<FIntPoint> CollisionCells;
+	FCollisionQueryParams QueryParams(NAME_None, true);
+	QueryParams.bTraceComplex = true;
+	auto RasterizeComponentBounds = [CellSize, &ActorTransform](
+		const FPhysicalComponent& Component,
+		TSet<FIntPoint>& OutCells)
+	{
+		const FBox CandidateBounds = Component.ActorBounds.ExpandBy(FVector(
+			GNoGrassFootprintPadding + CellSize * 0.5,
+			GNoGrassFootprintPadding + CellSize * 0.5,
+			0.0));
+		const int32 MinCellX = FMath::FloorToInt(CandidateBounds.Min.X / CellSize);
+		const int32 MaxCellX = FMath::FloorToInt(CandidateBounds.Max.X / CellSize);
+		const int32 MinCellY = FMath::FloorToInt(CandidateBounds.Min.Y / CellSize);
+		const int32 MaxCellY = FMath::FloorToInt(CandidateBounds.Max.Y / CellSize);
+		const FVector ComponentScale = Component.Transform.GetScale3D().GetAbs();
+		const FBox ExpandedLocalBounds = Component.LocalBounds.ExpandBy(FVector(
+			(GNoGrassFootprintPadding + CellSize * 0.5) / FMath::Max(ComponentScale.X, 0.01),
+			(GNoGrassFootprintPadding + CellSize * 0.5) / FMath::Max(ComponentScale.Y, 0.01),
+			0.0));
+		for (int32 CellY = MinCellY; CellY <= MaxCellY; ++CellY)
+		{
+			for (int32 CellX = MinCellX; CellX <= MaxCellX; ++CellX)
+			{
+				const FVector ActorStart(
+					(static_cast<double>(CellX) + 0.5) * CellSize,
+					(static_cast<double>(CellY) + 0.5) * CellSize,
+					Component.ActorBounds.Min.Z - 1.0);
+				const FVector ActorEnd(ActorStart.X, ActorStart.Y, Component.ActorBounds.Max.Z + 1.0);
+				const FVector LocalStart = Component.Transform.InverseTransformPosition(
+					ActorTransform.TransformPosition(ActorStart));
+				const FVector LocalEnd = Component.Transform.InverseTransformPosition(
+					ActorTransform.TransformPosition(ActorEnd));
+				if (SegmentIntersectsBox(LocalStart, LocalEnd, ExpandedLocalBounds))
+				{
+					OutCells.Add(FIntPoint(CellX, CellY));
+				}
+			}
+		}
+	};
+	const bool bUseCollisionGeometry = !CollisionComponents.IsEmpty();
+	for (const FPhysicalComponent& Component : Components)
+	{
+		if (!bUseCollisionGeometry || !IsValid(Component.Component))
+		{
+			RasterizeComponentBounds(Component, OccupiedCells);
+			continue;
+		}
+
+		const FBox CandidateBounds = Component.ActorBounds.ExpandBy(FVector(
+			CellSize * 0.5,
+			CellSize * 0.5,
+			0.0));
+		const int32 MinCellX = FMath::FloorToInt(CandidateBounds.Min.X / CellSize);
+		const int32 MaxCellX = FMath::FloorToInt(CandidateBounds.Max.X / CellSize);
+		const int32 MinCellY = FMath::FloorToInt(CandidateBounds.Min.Y / CellSize);
+		const int32 MaxCellY = FMath::FloorToInt(CandidateBounds.Max.Y / CellSize);
+		TSet<FIntPoint> ComponentCollisionCells;
+		for (int32 CellY = MinCellY; CellY <= MaxCellY; ++CellY)
+		{
+			for (int32 CellX = MinCellX; CellX <= MaxCellX; ++CellX)
+			{
+				const FVector ActorStart(
+					(static_cast<double>(CellX) + 0.5) * CellSize,
+					(static_cast<double>(CellY) + 0.5) * CellSize,
+					Component.ActorBounds.Min.Z - 1.0);
+				const FVector ActorEnd(ActorStart.X, ActorStart.Y, Component.ActorBounds.Max.Z + 1.0);
+				FHitResult Hit;
+				if (Component.Component->LineTraceComponent(
+					Hit,
+					ActorTransform.TransformPosition(ActorStart),
+					ActorTransform.TransformPosition(ActorEnd),
+					QueryParams))
+				{
+					ComponentCollisionCells.Add(FIntPoint(CellX, CellY));
+				}
+			}
+		}
+		if (ComponentCollisionCells.IsEmpty())
+		{
+			// Some custom primitive components advertise collision but do not
+			// implement component traces. Keep those modded buildings supported.
+			RasterizeComponentBounds(Component, OccupiedCells);
+		}
+		else
+		{
+			CollisionCells.Append(ComponentCollisionCells);
+		}
+	}
+
+	const int32 PaddingCells = FMath::Max(
+		1,
+		FMath::CeilToInt(GNoGrassFootprintPadding / CellSize));
+	for (const FIntPoint& Cell : CollisionCells)
+	{
+		for (int32 OffsetY = -PaddingCells; OffsetY <= PaddingCells; ++OffsetY)
+		{
+			for (int32 OffsetX = -PaddingCells; OffsetX <= PaddingCells; ++OffsetX)
+			{
+				if (FMath::Square(static_cast<double>(OffsetX) * CellSize) +
+					FMath::Square(static_cast<double>(OffsetY) * CellSize) <=
+					FMath::Square(GNoGrassFootprintPadding + CellSize * 0.5))
+				{
+					OccupiedCells.Add(Cell + FIntPoint(OffsetX, OffsetY));
+				}
+			}
+		}
+	}
+	if (OccupiedCells.IsEmpty())
+	{
+		return nullptr;
+	}
+
+	TMap<int32, TArray<int32>> CellsByRow;
+	for (const FIntPoint& Cell : OccupiedCells)
+	{
+		CellsByRow.FindOrAdd(Cell.Y).Add(Cell.X);
+	}
+
+	TSharedPtr<FNoGrassFootprintTemplate> Result = MakeShared<FNoGrassFootprintTemplate>();
+	Result->LocalBounds = LocalFootprintBounds.ExpandBy(FVector(
+		GNoGrassFootprintPadding,
+		GNoGrassFootprintPadding,
+		GNoGrassFootprintVerticalPadding));
+	Result->CellSize = CellSize;
+	Result->OccupiedCellCount = OccupiedCells.Num();
+	for (auto& Pair : CellsByRow)
+	{
+		Pair.Value.Sort();
+		TArray<FNoGrassFootprintRun>& Runs = Result->Rows.Add(Pair.Key);
+		FNoGrassFootprintRun Current{Pair.Value[0], Pair.Value[0]};
+		for (int32 Index = 1; Index < Pair.Value.Num(); ++Index)
+		{
+			if (Pair.Value[Index] <= Current.MaxCellX + 1)
+			{
+				Current.MaxCellX = Pair.Value[Index];
+			}
+			else
+			{
+				Runs.Add(Current);
+				Current = {Pair.Value[Index], Pair.Value[Index]};
+			}
+		}
+		Runs.Add(Current);
+	}
+	return Result;
+}
+
 bool FNoGrassUnderBuildingsModule::IsCollisionFootprintCovered(
 	const TWeakObjectPtr<AFGBuildable>& Buildable,
 	const FVector& Location) const
@@ -2053,12 +2403,32 @@ bool FNoGrassUnderBuildingsModule::IsCollisionFootprintCovered(
 		return false;
 	}
 
+	if (Footprint->Template)
+	{
+		const FVector LocalLocation = Footprint->ActorTransform.InverseTransformPosition(Location);
+		const int32 CellX = FMath::FloorToInt(LocalLocation.X / Footprint->Template->CellSize);
+		const int32 CellY = FMath::FloorToInt(LocalLocation.Y / Footprint->Template->CellSize);
+		if (const TArray<FNoGrassFootprintRun>* Runs = Footprint->Template->Rows.Find(CellY))
+		{
+			return Runs->ContainsByPredicate(
+				[CellX](const FNoGrassFootprintRun& Run)
+				{
+					return CellX >= Run.MinCellX && CellX <= Run.MaxCellX;
+				});
+		}
+		return false;
+	}
+	if (!Footprint->bUsesSpaceElevatorMask)
+	{
+		return false;
+	}
+
 	const FVector LocalLocation = Footprint->ComponentTransform.InverseTransformPosition(Location);
 	const int32 LocalCellX =
-		FMath::FloorToInt(LocalLocation.X / CollisionFootprintCellSize) -
+		FMath::FloorToInt(LocalLocation.X / SpaceElevatorFootprintCellSize) -
 		GNoGrassSpaceElevatorMinCellX;
 	const int32 LocalCellY =
-		FMath::FloorToInt(LocalLocation.Y / CollisionFootprintCellSize) -
+		FMath::FloorToInt(LocalLocation.Y / SpaceElevatorFootprintCellSize) -
 		GNoGrassSpaceElevatorMinCellY;
 	if (LocalCellX < 0 || LocalCellX >= GNoGrassSpaceElevatorCellCountX ||
 		LocalCellY < 0 || LocalCellY >= GNoGrassSpaceElevatorCellCountY)
@@ -2075,7 +2445,7 @@ void FNoGrassUnderBuildingsModule::AddLandscapeExclusion(
 	AFGBuildable* Buildable,
 	bool bRefresh)
 {
-	if (!IsValid(Buildable))
+	if (!IsValid(Buildable) || Buildable->IsA<AFGBuildableWire>())
 	{
 		return;
 	}
@@ -2085,7 +2455,7 @@ void FNoGrassUnderBuildingsModule::AddLandscapeExclusion(
 		return;
 	}
 
-	const FBox Bounds = GetLandscapeExclusionBounds(Buildable);
+	FBox Bounds = GetLandscapeExclusionBounds(Buildable);
 	if (!Bounds.IsValid)
 	{
 		return;
@@ -2093,7 +2463,8 @@ void FNoGrassUnderBuildingsModule::AddLandscapeExclusion(
 
 	const TWeakObjectPtr<AFGBuildable> Owner(Buildable);
 	UPrimitiveComponent* CollisionComponent = nullptr;
-	if (Buildable->GetClass()->GetName() == TEXT("Build_SpaceElevator_C"))
+	const bool bSpaceElevator = Buildable->GetClass()->GetName() == TEXT("Build_SpaceElevator_C");
+	if (bSpaceElevator)
 	{
 		static const FName MainMeshName(TEXT("MainMesh"));
 		TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(Buildable);
@@ -2107,18 +2478,41 @@ void FNoGrassUnderBuildingsModule::AddLandscapeExclusion(
 		}
 	}
 
+	FNoGrassCollisionFootprint Footprint;
 	if (CollisionComponent)
 	{
-		FNoGrassCollisionFootprint Footprint;
 		Footprint.Bounds = Bounds;
 		Footprint.ComponentTransform = CollisionComponent->GetComponentTransform();
-		CollisionFootprints.Add(Owner, Footprint);
+		Footprint.bUsesSpaceElevatorMask = true;
 		UE_LOG(
 			LogNoGrassUnderBuildings,
 			Display,
 			TEXT("Precomputed physical footprint ready: class=%s occupied=%d"),
 			*GetNameSafe(Buildable->GetClass()),
 			GNoGrassSpaceElevatorOccupiedCellCount);
+	}
+	else if (!bSpaceElevator)
+	{
+		Footprint.Template = GetOrCreateFootprintTemplate(Buildable);
+		if (Footprint.Template)
+		{
+			Footprint.ActorTransform = Buildable->GetActorTransform();
+			Footprint.Bounds = Footprint.Template->LocalBounds.TransformBy(
+				Footprint.ActorTransform.ToMatrixWithScale());
+			if (IsFiniteBox(Footprint.Bounds))
+			{
+				Bounds = Footprint.Bounds;
+			}
+			else
+			{
+				Footprint.Template.Reset();
+			}
+		}
+	}
+
+	if (Footprint.bUsesSpaceElevatorMask || Footprint.Template)
+	{
+		CollisionFootprints.Add(Owner, MoveTemp(Footprint));
 	}
 	else
 	{

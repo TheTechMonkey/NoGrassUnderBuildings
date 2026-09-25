@@ -12,6 +12,7 @@ Stops grass and small decorative ground vegetation from poking through foundatio
 - Reapplies suppression when foliage streams back in after travelling away.
 - Batches related placement and dismantle events into a single targeted refresh.
 - Avoids refreshing areas that remain covered by another tracked building.
+- Uses cached physical footprints for stock and modded buildings instead of clearing their full actor bounds.
 - Uses a precise, precomputed physical footprint for the Space Elevator instead of its enormous orbital bounds.
 - Optionally clears supported decorative foliage along saved vehicle paths, using a route width based on the assigned vehicle.
 - Restores route foliage when a path is removed or vehicle-path clearing is disabled.
