@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.11
+
+- Limited building-change foliage reconciliation to components near the affected area instead of reprocessing decorative foliage across the loaded world.
+- Checked streamed-level membership before performing mesh-path classification.
+- Included component discovery in streamed-foliage performance timing.
+- Preserved immediate restoration for previously hidden foliage and reduced repeated bounds work for blueprint and zoop placement batches.
+
 ## 1.3.10
 
 - Replaced oversized actor bounds with cached, collision-derived footprints for stock and modded buildings.

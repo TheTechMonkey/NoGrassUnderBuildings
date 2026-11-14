@@ -373,14 +373,13 @@ void FNoGrassUnderBuildingsModule::ReconcileDecorativeFoliage(
 
 	TSet<FNoGrassFoliageInstanceKey> DesiredSuppression;
 	TSet<TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent>> DirtyComponents;
-	for (TObjectIterator<UHierarchicalInstancedStaticMeshComponent> It; It; ++It)
+	auto ReconcileComponent = [this, World, &DesiredSuppression](
+		UHierarchicalInstancedStaticMeshComponent* Component)
 	{
-		UHierarchicalInstancedStaticMeshComponent* Component = *It;
 		if (!IsValid(Component) || Component->GetWorld() != World ||
-			!Component->IsRegistered() || !IsDecorativeGroundFoliage(Component) ||
-			(ComponentFilter && !ComponentFilter->Contains(Component)))
+			!Component->IsRegistered() || !IsDecorativeGroundFoliage(Component))
 		{
-			continue;
+			return;
 		}
 
 		const FBox ComponentBounds = Component->Bounds.GetBox();
@@ -404,6 +403,24 @@ void FNoGrassUnderBuildingsModule::ReconcileDecorativeFoliage(
 					DesiredSuppression.Add({Component, InstanceIndex});
 				}
 			}
+		}
+	};
+
+	if (ComponentFilter)
+	{
+		// Targeted refreshes already identified the relevant components. Iterate
+		// that small set directly instead of walking every HISM in the process a
+		// second time.
+		for (const TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent>& Component : *ComponentFilter)
+		{
+			ReconcileComponent(Component.Get());
+		}
+	}
+	else
+	{
+		for (TObjectIterator<UHierarchicalInstancedStaticMeshComponent> It; It; ++It)
+		{
+			ReconcileComponent(*It);
 		}
 	}
 
@@ -523,12 +540,13 @@ void FNoGrassUnderBuildingsModule::ProcessPendingStreamedFoliage(UWorld* World)
 
 	TSet<TWeakObjectPtr<ULevel>> StreamedLevels = MoveTemp(PendingStreamedLevels);
 	PendingStreamedLevels.Reset();
+	const double StartedAt = FPlatformTime::Seconds();
 	TSet<TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent>> Components;
 	for (TObjectIterator<UHierarchicalInstancedStaticMeshComponent> It; It; ++It)
 	{
 		UHierarchicalInstancedStaticMeshComponent* Component = *It;
 		if (!IsValid(Component) || Component->GetWorld() != World ||
-			!Component->IsRegistered() || !IsDecorativeGroundFoliage(Component))
+			!Component->IsRegistered())
 		{
 			continue;
 		}
@@ -537,7 +555,9 @@ void FNoGrassUnderBuildingsModule::ProcessPendingStreamedFoliage(UWorld* World)
 		{
 			ComponentLevel = Component->GetOwner()->GetLevel();
 		}
-		if (StreamedLevels.Contains(ComponentLevel))
+		// Level membership is a cheap set lookup. Only build mesh path strings for
+		// components that actually belong to one of the newly streamed levels.
+		if (StreamedLevels.Contains(ComponentLevel) && IsDecorativeGroundFoliage(Component))
 		{
 			Components.Add(Component);
 		}
@@ -545,29 +565,28 @@ void FNoGrassUnderBuildingsModule::ProcessPendingStreamedFoliage(UWorld* World)
 
 	if (!Components.IsEmpty())
 	{
-		const double StartedAt = FPlatformTime::Seconds();
 		ReconcileDecorativeFoliage(World, &Components);
-		const double ElapsedMs = (FPlatformTime::Seconds() - StartedAt) * 1000.0;
-		if (ElapsedMs >= 10.0)
-		{
-			UE_LOG(
-				LogNoGrassUnderBuildings,
-				Display,
-				TEXT("Slow streamed-foliage reconciliation: components=%d levels=%d time=%.2f ms"),
-				Components.Num(),
-				StreamedLevels.Num(),
-				ElapsedMs);
-		}
-		else
-		{
-			UE_LOG(
-				LogNoGrassUnderBuildings,
-				Verbose,
-				TEXT("Reconciled %d decorative foliage component(s) from %d streamed level(s) in %.2f ms"),
-				Components.Num(),
-				StreamedLevels.Num(),
-				ElapsedMs);
-		}
+	}
+	const double ElapsedMs = (FPlatformTime::Seconds() - StartedAt) * 1000.0;
+	if (ElapsedMs >= 10.0)
+	{
+		UE_LOG(
+			LogNoGrassUnderBuildings,
+			Display,
+			TEXT("Slow streamed-foliage reconciliation: components=%d levels=%d time=%.2f ms"),
+			Components.Num(),
+			StreamedLevels.Num(),
+			ElapsedMs);
+	}
+	else
+	{
+		UE_LOG(
+			LogNoGrassUnderBuildings,
+			Verbose,
+			TEXT("Reconciled %d decorative foliage component(s) from %d streamed level(s) in %.2f ms"),
+			Components.Num(),
+			StreamedLevels.Num(),
+			ElapsedMs);
 	}
 }
 
@@ -1083,7 +1102,94 @@ void FNoGrassUnderBuildingsModule::ProcessPendingCoverageRefresh(UWorld* World)
 
 	RefreshLandscapeGrass(World, RefreshBounds);
 	++CoverageRevision;
-	ReconcileDecorativeFoliage(World);
+
+	// Decorative foliage only needs reconciliation near the changed coverage.
+	// Merge overlapping refresh boxes first so blueprint and zoop batches do not
+	// multiply every component-bounds test by every placed buildable.
+	TArray<FBox> ReconcileBounds;
+	for (const FBox& Bounds : RefreshBounds)
+	{
+		if (!Bounds.IsValid)
+		{
+			continue;
+		}
+
+		FBox ExpandedBounds = Bounds.ExpandBy(FVector(
+			GNoGrassFootprintPadding,
+			GNoGrassFootprintPadding,
+			GNoGrassFootprintPadding));
+		bool bMerged;
+		do
+		{
+			bMerged = false;
+			for (int32 Index = ReconcileBounds.Num() - 1; Index >= 0; --Index)
+			{
+				if (ExpandedBounds.Intersect(ReconcileBounds[Index]))
+				{
+					ExpandedBounds += ReconcileBounds[Index];
+					ReconcileBounds.RemoveAtSwap(Index);
+					bMerged = true;
+					break;
+				}
+			}
+		}
+		while (bMerged);
+		ReconcileBounds.Add(ExpandedBounds);
+	}
+
+	auto IntersectsRefresh = [&ReconcileBounds](const FBox& Bounds)
+	{
+		return Bounds.IsValid && ReconcileBounds.ContainsByPredicate(
+			[&Bounds](const FBox& RefreshBounds)
+			{
+				return Bounds.Intersect(RefreshBounds);
+			});
+	};
+	auto LocationIntersectsRefresh = [&ReconcileBounds](const FVector& Location)
+	{
+		return ReconcileBounds.ContainsByPredicate(
+			[&Location](const FBox& RefreshBounds)
+			{
+				return RefreshBounds.IsInsideOrOn(Location);
+			});
+	};
+
+	TSet<TWeakObjectPtr<UHierarchicalInstancedStaticMeshComponent>> AffectedComponents;
+	for (TObjectIterator<UHierarchicalInstancedStaticMeshComponent> It; It; ++It)
+	{
+		UHierarchicalInstancedStaticMeshComponent* Component = *It;
+		if (!IsValid(Component) || Component->GetWorld() != World ||
+			!Component->IsRegistered() || !IntersectsRefresh(Component->Bounds.GetBox()))
+		{
+			continue;
+		}
+
+		// The path-name classification is intentionally last so unrelated world
+		// components only pay for pointer and bounds checks.
+		if (IsDecorativeGroundFoliage(Component))
+		{
+			AffectedComponents.Add(Component);
+		}
+	}
+
+	// Hidden instances have been moved below the world and may no longer
+	// contribute useful component bounds. Include their owning component when
+	// the saved original position lies in the changed area so dismantling still
+	// restores foliage immediately.
+	for (const auto& Pair : SuppressedFoliage)
+	{
+		if (Pair.Key.Component.IsValid() &&
+			Pair.Key.Component->GetWorld() == World &&
+			LocationIntersectsRefresh(Pair.Value.GetLocation()))
+		{
+			AffectedComponents.Add(Pair.Key.Component);
+		}
+	}
+
+	if (!AffectedComponents.IsEmpty())
+	{
+		ReconcileDecorativeFoliage(World, &AffectedComponents);
+	}
 	AppliedFoliageRevision = CoverageRevision;
 
 	const double FinishedAt = FPlatformTime::Seconds();
