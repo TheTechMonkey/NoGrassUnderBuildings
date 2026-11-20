@@ -166,6 +166,7 @@ private:
 		const FVector& Location) const;
 	TSharedPtr<const FNoGrassFootprintTemplate> GetOrCreateFootprintTemplate(AFGBuildable* Buildable);
 	TSharedPtr<const FNoGrassFootprintTemplate> BuildFootprintTemplate(AFGBuildable* Buildable) const;
+	bool TryGetSplineShapeHash(AFGBuildable* Buildable, uint64& OutHash) const;
 	void AddLandscapeExclusion(AFGBuildable* Buildable, bool bRefresh = true);
 	void RemoveLandscapeExclusion(
 		const TWeakObjectPtr<AFGBuildable>& Buildable,
@@ -184,6 +185,7 @@ private:
 	TMap<TWeakObjectPtr<AFGBuildable>, FBox> ExclusionBounds;
 	TMap<TWeakObjectPtr<AFGBuildable>, FNoGrassCollisionFootprint> CollisionFootprints;
 	TMap<UClass*, TSharedPtr<const FNoGrassFootprintTemplate>> FootprintTemplates;
+	TMap<uint64, TSharedPtr<const FNoGrassFootprintTemplate>> SplineFootprintTemplates;
 	TMap<FIntVector, TSet<TWeakObjectPtr<AFGBuildable>>> BuildableCoverageGrid;
 	TMap<TWeakObjectPtr<AFGBuildable>, FNoGrassVehiclePathExclusion> VehiclePathExclusions;
 	TMap<FIntVector, TSet<TWeakObjectPtr<AFGBuildable>>> VehiclePathCoverageGrid;

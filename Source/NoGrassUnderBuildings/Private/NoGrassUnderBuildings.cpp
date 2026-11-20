@@ -5,6 +5,8 @@
 #include "Buildables/FGBuildableWire.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/SplineComponent.h"
+#include "Hash/xxhash.h"
 #include "Engine/World.h"
 #include "Engine/Level.h"
 #include "EngineUtils.h"
@@ -31,6 +33,8 @@ namespace
 	constexpr double GNoGrassMaxComponentSpan = 100000.0;
 	constexpr double GNoGrassMaxComponentDistance = 200000.0;
 	constexpr double GNoGrassFootprintPadding = 150.0;
+	// Upper bound on cached spline shapes. Past it, new shapes are still built but not kept.
+	constexpr int32 GNoGrassMaxSplineFootprintTemplates = 8192;
 	constexpr double GNoGrassFootprintVerticalPadding = 200.0;
 	constexpr double GNoGrassMinimumFootprintCellSize = 50.0;
 	constexpr double GNoGrassFootprintCellStep = 25.0;
@@ -239,6 +243,7 @@ void FNoGrassUnderBuildingsModule::ShutdownModule()
 	ExcludedBuildables.Empty();
 	ExclusionBounds.Empty();
 	CollisionFootprints.Empty();
+	SplineFootprintTemplates.Empty();
 	BuildableCoverageGrid.Empty();
 	VehiclePathExclusions.Empty();
 	VehiclePathCoverageGrid.Empty();
@@ -489,7 +494,10 @@ void FNoGrassUnderBuildingsModule::ReconcileDecorativeFoliage(
 	TArray<FNoGrassFoliageInstanceKey> RestoreKeys;
 	for (const auto& Pair : SuppressedFoliage)
 	{
-		if ((!ComponentFilter || ComponentFilter->Contains(Pair.Key.Component)) &&
+		// A component that streamed out is never in a filter, so drop its records
+		// on every reconcile instead of keeping them for the rest of the session.
+		if ((!Pair.Key.Component.IsValid() || !ComponentFilter ||
+				ComponentFilter->Contains(Pair.Key.Component)) &&
 			!DesiredSuppression.Contains(Pair.Key))
 		{
 			RestoreKeys.Add(Pair.Key);
@@ -649,6 +657,7 @@ void FNoGrassUnderBuildingsModule::HandlePostWorldInitialization(
 		ExcludedBuildables.Empty();
 		ExclusionBounds.Empty();
 		CollisionFootprints.Empty();
+		SplineFootprintTemplates.Empty();
 		BuildableCoverageGrid.Empty();
 		VehiclePathExclusions.Empty();
 		VehiclePathCoverageGrid.Empty();
@@ -709,6 +718,7 @@ void FNoGrassUnderBuildingsModule::HandleWorldCleanup(
 		ExcludedBuildables.Empty();
 		ExclusionBounds.Empty();
 		CollisionFootprints.Empty();
+		SplineFootprintTemplates.Empty();
 		BuildableCoverageGrid.Empty();
 		VehiclePathExclusions.Empty();
 		VehiclePathCoverageGrid.Empty();
@@ -1220,18 +1230,73 @@ bool FNoGrassUnderBuildingsModule::IsHorizontalAreaFullyCovered(const FBox& Boun
 			Candidates.Add(Candidate);
 		}
 	};
-	for (const auto& Pair : ExclusionBounds)
+	// A physical collision footprint is not a filled rectangle, so it cannot
+	// prove that an entire horizontal area is already covered.
+	FIntVector MinCell;
+	FIntVector MaxCell;
+	if (TryGetCoverageGridRange(Bounds, MinCell, MaxCell))
 	{
-		// A physical collision footprint is not a filled rectangle, so it cannot
-		// prove that an entire horizontal area is already covered.
-		if (!CollisionFootprints.Contains(Pair.Key))
+		// Only entries registered in the cells this area touches can overlap it,
+		// so the cost follows the size of the change instead of the save.
+		TSet<TWeakObjectPtr<AFGBuildable>> SeenBuildables;
+		TSet<FNoGrassLightweightKey> SeenLightweights;
+		for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
 		{
-			AddCandidate(Pair.Value);
+			for (int32 Y = MinCell.Y; Y <= MaxCell.Y; ++Y)
+			{
+				for (int32 Z = MinCell.Z; Z <= MaxCell.Z; ++Z)
+				{
+					const FIntVector Cell(X, Y, Z);
+					if (const TSet<TWeakObjectPtr<AFGBuildable>>* Entries = BuildableCoverageGrid.Find(Cell))
+					{
+						for (const TWeakObjectPtr<AFGBuildable>& Key : *Entries)
+						{
+							bool bAlreadySeen = false;
+							SeenBuildables.Add(Key, &bAlreadySeen);
+							if (bAlreadySeen || CollisionFootprints.Contains(Key))
+							{
+								continue;
+							}
+							if (const FBox* CandidateBounds = ExclusionBounds.Find(Key))
+							{
+								AddCandidate(*CandidateBounds);
+							}
+						}
+					}
+					if (const TSet<FNoGrassLightweightKey>* Entries = LightweightCoverageGrid.Find(Cell))
+					{
+						for (const FNoGrassLightweightKey& Key : *Entries)
+						{
+							bool bAlreadySeen = false;
+							SeenLightweights.Add(Key, &bAlreadySeen);
+							if (bAlreadySeen)
+							{
+								continue;
+							}
+							if (const FNoGrassLightweightExclusion* Existing = LightweightExclusions.Find(Key))
+							{
+								AddCandidate(Existing->Bounds);
+							}
+						}
+					}
+				}
+			}
 		}
 	}
-	for (const auto& Pair : LightweightExclusions)
+	else
 	{
-		AddCandidate(Pair.Value.Bounds);
+		// The area is too large for the grid, so fall back to a full scan.
+		for (const auto& Pair : ExclusionBounds)
+		{
+			if (!CollisionFootprints.Contains(Pair.Key))
+			{
+				AddCandidate(Pair.Value);
+			}
+		}
+		for (const auto& Pair : LightweightExclusions)
+		{
+			AddCandidate(Pair.Value.Bounds);
+		}
 	}
 	if (Candidates.IsEmpty())
 	{
@@ -2217,6 +2282,53 @@ FBox FNoGrassUnderBuildingsModule::GetLandscapeExclusionBounds(AFGBuildable* Bui
 			: FVector(100.0f, 100.0f, 200.0f));
 }
 
+bool FNoGrassUnderBuildingsModule::TryGetSplineShapeHash(
+	AFGBuildable* Buildable,
+	uint64& OutHash) const
+{
+	TInlineComponentArray<USplineComponent*> SplineComponents(Buildable);
+	if (SplineComponents.IsEmpty())
+	{
+		return false;
+	}
+
+	// Quantize to 1 cm in actor space so identical shapes, such as copies from a
+	// blueprint, still share one template while different shapes never do.
+	auto Quantize = [](double Value)
+	{
+		return static_cast<int64>(FMath::RoundToDouble(Value));
+	};
+	TArray<int64> ShapeData;
+	ShapeData.Add(static_cast<int64>(reinterpret_cast<UPTRINT>(Buildable->GetClass())));
+	const FTransform ActorTransform = Buildable->GetActorTransform();
+	for (const USplineComponent* Spline : SplineComponents)
+	{
+		if (!IsValid(Spline))
+		{
+			continue;
+		}
+		const int32 PointCount = Spline->GetNumberOfSplinePoints();
+		ShapeData.Add(PointCount);
+		for (int32 PointIndex = 0; PointIndex < PointCount; ++PointIndex)
+		{
+			const FVector Location = ActorTransform.InverseTransformPosition(
+				Spline->GetLocationAtSplinePoint(PointIndex, ESplineCoordinateSpace::World));
+			const FVector ArriveTangent = ActorTransform.InverseTransformVector(
+				Spline->GetArriveTangentAtSplinePoint(PointIndex, ESplineCoordinateSpace::World));
+			const FVector LeaveTangent = ActorTransform.InverseTransformVector(
+				Spline->GetLeaveTangentAtSplinePoint(PointIndex, ESplineCoordinateSpace::World));
+			for (const FVector& Vector : {Location, ArriveTangent, LeaveTangent})
+			{
+				ShapeData.Add(Quantize(Vector.X));
+				ShapeData.Add(Quantize(Vector.Y));
+				ShapeData.Add(Quantize(Vector.Z));
+			}
+		}
+	}
+	OutHash = FXxHash64::HashBuffer(ShapeData.GetData(), ShapeData.Num() * sizeof(int64)).Hash;
+	return true;
+}
+
 TSharedPtr<const FNoGrassFootprintTemplate> FNoGrassUnderBuildingsModule::GetOrCreateFootprintTemplate(
 	AFGBuildable* Buildable)
 {
@@ -2225,7 +2337,19 @@ TSharedPtr<const FNoGrassFootprintTemplate> FNoGrassUnderBuildingsModule::GetOrC
 		return nullptr;
 	}
 
-	if (const TSharedPtr<const FNoGrassFootprintTemplate>* Existing =
+	// Belts, pipes, hypertubes and tracks share a class but each instance has its
+	// own spline shape, so their templates are cached by shape instead of class.
+	uint64 SplineShapeHash = 0;
+	const bool bSplineShaped = TryGetSplineShapeHash(Buildable, SplineShapeHash);
+	if (bSplineShaped)
+	{
+		if (const TSharedPtr<const FNoGrassFootprintTemplate>* Existing =
+			SplineFootprintTemplates.Find(SplineShapeHash))
+		{
+			return *Existing;
+		}
+	}
+	else if (const TSharedPtr<const FNoGrassFootprintTemplate>* Existing =
 		FootprintTemplates.Find(Buildable->GetClass()))
 	{
 		return *Existing;
@@ -2233,7 +2357,17 @@ TSharedPtr<const FNoGrassFootprintTemplate> FNoGrassUnderBuildingsModule::GetOrC
 
 	const double StartedAt = FPlatformTime::Seconds();
 	TSharedPtr<const FNoGrassFootprintTemplate> Result = BuildFootprintTemplate(Buildable);
-	FootprintTemplates.Add(Buildable->GetClass(), Result);
+	if (bSplineShaped)
+	{
+		if (SplineFootprintTemplates.Num() < GNoGrassMaxSplineFootprintTemplates)
+		{
+			SplineFootprintTemplates.Add(SplineShapeHash, Result);
+		}
+	}
+	else
+	{
+		FootprintTemplates.Add(Buildable->GetClass(), Result);
+	}
 	const double ElapsedMs = (FPlatformTime::Seconds() - StartedAt) * 1000.0;
 	if (Result)
 	{
