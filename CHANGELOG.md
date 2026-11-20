@@ -5,7 +5,6 @@
 - Checked only nearby buildings when deciding whether a placed or removed piece was already covered, so large blueprints no longer cost more as the save grows.
 - Dropped hidden-foliage records for foliage that has streamed out, which 1.3.11 kept for the rest of the session.
 - Gave conveyor belts, pipes, hypertubes and railway tracks their own footprint per shape instead of reusing the first one placed of each type.
-- Updated for Satisfactory 1.2.5.1 (build 520140) and SML 3.12.0.
 
 ## 1.3.11
 

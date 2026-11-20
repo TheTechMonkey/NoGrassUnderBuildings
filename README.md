@@ -25,5 +25,5 @@ The mod does not automatically remove trees, bushes, berries, resource plants, o
 
 ## Compatibility
 
-- Satisfactory 1.2.5.1 (build 520140) or newer
+- Satisfactory 1.2.4 (build 502094) or newer
 - SML 3.12.0 or newer

@@ -11,7 +11,7 @@
 	"IsBetaVersion": false,
 	"IsExperimentalVersion": false,
 	"Installed": false,
-	"GameVersion": ">=520140",
+	"GameVersion": ">=502094",
 	"RequiredOnRemote": true,
 	"Modules": [
 		{
